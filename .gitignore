@@ -1,2 +1,6 @@
 ./src/node_modules
 ./examples/radata
+.idea
+.gitignore
+markdown.md
+prompt.txt
