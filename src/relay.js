@@ -123,7 +123,7 @@ function readBody(req) {
   });
 }
 
-const SHELL_DIR = path.join(__dirname, 'utils');
+const SHELL_DIR = path.join(__dirname, 'dir');
 
 function serveFile(res, filepath, mime) {
   if (res.headersSent) return;

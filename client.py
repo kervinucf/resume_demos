@@ -11,6 +11,11 @@ from pathlib import Path
 import os
 import re
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 log = logging.getLogger(__name__)
 
 RE_COMPONENT = re.compile(r'data-component="([^"]+)"')
