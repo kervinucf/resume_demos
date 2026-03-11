@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Scene</title>
+    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+    <style>
+        html, body, #scene {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #scene {
+            position: relative;
+        }
+
+        #inspect-shell {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 34vw;
+            min-width: 360px;
+            max-width: 620px;
+            height: 100vh;
+            z-index: 99999;
+            display: none;
+            background: rgba(0, 0, 0, 0.94);
+            color: #e2e8f0;
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(22px);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        #inspect-shell.on {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ig-head {
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .ig-title {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .ig-sub {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #94a3b8;
+            word-break: break-all;
+        }
+
+        .ig-row {
+            display: flex;
+            gap: 8px;
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .ig-row input, .ig-row button, .ig-row textarea {
+            font: inherit;
+        }
+
+        .ig-row input {
+            flex: 1;
+            background: #050505;
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px 10px;
+        }
+
+        .ig-row button {
+            background: #e2e8f0;
+            color: #000;
+            border: 0;
+            padding: 8px 10px;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        .ig-row button.alt {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+        }
+
+        .ig-row button.danger {
+            background: #7f1d1d;
+            color: #fff;
+        }
+
+        .ig-body {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            min-height: 0;
+            flex: 1;
+        }
+
+        .ig-list {
+            border-right: 1px solid rgba(255, 255, 255, 0.06);
+            overflow: auto;
+        }
+
+        .ig-list-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            border: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: #cbd5e1;
+            padding: 10px 12px;
+            cursor: pointer;
+            word-break: break-word;
+        }
+
+        .ig-list-item:hover,
+        .ig-list-item.on {
+            background: rgba(255, 255, 255, 0.06);
+            color: #fff;
+        }
+
+        .ig-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ig-section-label {
+            font-size: 10px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #94a3b8;
+            padding: 10px 14px 0 14px;
+        }
+
+        .ig-editor {
+            flex: 1;
+            min-height: 260px;
+            margin: 10px 14px 14px 14px;
+            background: #050505;
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 12px;
+            resize: none;
+            line-height: 1.45;
+        }
+
+        .ig-meta {
+            padding: 0 14px 12px 14px;
+            font-size: 11px;
+            color: #94a3b8;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .ig-links {
+            padding: 0 14px 14px 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .ig-links button {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 6px 8px;
+            cursor: pointer;
+            font: inherit;
+        }
+
+        @media (max-width: 980px) {
+            #inspect-shell {
+                width: 100vw;
+                min-width: 0;
+            }
+
+            .ig-body {
+                grid-template-columns: 1fr;
+            }
+
+            .ig-list {
+                max-height: 24vh;
+                border-right: 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            }
+        }
+    </style>
+</head>
+<body>
+<div id="scene"></div>
+
+<aside id="inspect-shell">
+    <div class="ig-head">
+        <div class="ig-title">Hypergraph Console</div>
+        <div class="ig-sub" id="inspect-bucket"></div>
+    </div>
+
+    <div class="ig-row">
+        <input id="inspect-path" placeholder="node path"/>
+        <button id="inspect-go">Go</button>
+        <button id="inspect-refresh" class="alt">Refresh</button>
+    </div>
+
+    <div class="ig-row">
+        <button id="inspect-save">Save</button>
+        <button id="inspect-delete" class="danger">Delete</button>
+        <button id="inspect-clear" class="alt">Clear Bucket</button>
+    </div>
+
+    <div class="ig-body">
+        <div class="ig-list" id="inspect-keys"></div>
+        <div class="ig-main">
+            <div class="ig-section-label">Node JSON</div>
+            <textarea id="inspect-editor" class="ig-editor" spellcheck="false"></textarea>
+            <div class="ig-section-label">Meta</div>
+            <div id="inspect-meta" class="ig-meta"></div>
+            <div class="ig-section-label">Links</div>
+            <div id="inspect-links" class="ig-links"></div>
+        </div>
+    </div>
+</aside>
+
+<script>
+    const parts = location.pathname.split('/').filter(Boolean);
+    const inspectMode = parts[0] === 'inspect';
+    const bucket = inspectMode ? (parts[1] || 'default') : (parts[0] || 'default');
+
+    const gun = Gun({peers: [location.origin + '/gun']});
+    const SEA = Gun.SEA;
+    const scene = gun.get(bucket).get('scene');
+    const root = document.getElementById('scene');
+    const live = {};
+    const AF = Object.getPrototypeOf(async function () {
+    }).constructor;
+    const jsHashes = {};
+
+    document.title = inspectMode ? `inspect:${bucket}` : bucket;
+    window.$gun = gun;
+    window.$SEA = SEA;
+    window.$scene = scene;
+    window.$root = root;
+    window.$bucket = bucket;
+    window.$inspect = inspectMode;
+    live["root"] = root;
+    const CONTENT_FIELDS = [
+        'html', 'css', 'js', 'link', 'json', 'data', 'meta', 'links', 'actions',
+        'layer', 'fixed', 'portal'
+    ];
+
+    function hasContent(data) {
+        return CONTENT_FIELDS.some(f => data[f] !== undefined && data[f] !== null);
+    }
+
+    function isCleared(data) {
+        if (!data) return true;
+        if (hasContent(data)) return false;
+        return true;
+    }
+
+    function keyToId(key) {
+        return 'frag-' + String(key).replace(/[^\w~-]/g, '_');
+    }
+
+    function parentKeyOf(key) {
+
+        // row break
+        if (key.includes("~")) {
+            return key.split("~")[0] || null;
+        }
+
+        // nesting
+        const parts = key.split("/").filter(Boolean);
+
+        if (parts.length <= 1) return null;
+
+        return parts.slice(0, -1).join("/");
+    }
+
+    function hostForKey(key) {
+        return live[key] || document.getElementById(keyToId(key)) || null;
+    }
+
+    function rootMountStyle(el, layer) {
+        el.style.position = 'fixed';
+        el.style.inset = '0';
+        el.style.zIndex = String(layer);
+        el.style.pointerEvents = layer <= 0 ? 'none' : 'auto';
+    }
+
+function childMountStyle(el, layer) {
+    el.style.position = 'relative';
+    el.style.flex = '0 0 auto';
+    el.style.minWidth = '0';
+    el.style.minHeight = '';
+    el.style.width = '';
+    el.style.height = '';
+    el.style.top = '';
+    el.style.left = '';
+    el.style.inset = '';
+    el.style.zIndex = String(layer);
+    el.style.pointerEvents = layer <= 0 ? 'none' : 'auto';
+}
+    function ensureHost(key, resolved, data) {
+        if (live[key]) return live[key];
+
+        const host = document.createElement('div');
+        host.id = keyToId(key);
+        host.dataset.key = key;
+        host.dataset.owner = key;
+
+        const layer = Number(resolved?.layer ?? data?.layer ?? 0) || 0;
+        const parentKey = parentKeyOf(key);
+        const isRow = key.includes("~");
+        const wantsRoot = !!(resolved?.fixed || data?.fixed || resolved?.portal || data?.portal);
+        const parentHost = parentKey ? hostForKey(parentKey) : null;
+
+        if (parentHost && !wantsRoot) {
+
+            childMountStyle(host, layer);
+
+            let mountPoint;
+
+            if (isRow) {
+
+                // ensure row container
+                let row = parentHost.querySelector("[data-row]");
+                if (!row) {
+                    row = document.createElement("div");
+                    row.dataset.row = "";
+
+                    row.style.display = "flex";
+                    row.style.flex = "1";
+                    row.style.width = "100%";
+                    row.style.height = "100%";
+                    row.style.minHeight = "0";
+
+                    parentHost.appendChild(row);
+                }
+
+                mountPoint = row;
+
+            } else {
+
+                mountPoint = parentHost.querySelector('[data-children]') || parentHost;
+
+            }
+
+            mountPoint.appendChild(host);
+
+        } else {
+
+            rootMountStyle(host, layer);
+            root.appendChild(host);
+
+        }
+
+        live[key] = host;
+        return host;
+    }
+
+    function isRowKey(key) {
+        return String(key).includes("~");
+    }
+
+    function restyleHost(host, key, resolved, data) {
+        const layer = Number(resolved?.layer ?? data?.layer ?? 0) || 0;
+        const parentKey = parentKeyOf(key);
+        const wantsRoot = !!(resolved?.fixed || data?.fixed || resolved?.portal || data?.portal);
+        const parentHost = parentKey ? hostForKey(parentKey) : null;
+        const shouldBeInRoot = !parentHost || wantsRoot;
+
+        if (shouldBeInRoot) {
+            rootMountStyle(host, layer);
+            if (host.parentElement !== root) root.appendChild(host);
+            return;
+        }
+
+        childMountStyle(host, layer);
+
+        let mountPoint;
+
+        if (isRowKey(key)) {
+            let row = parentHost.querySelector("[data-row]");
+            if (!row) {
+                row = document.createElement("div");
+                row.dataset.row = "";
+                row.style.display = "flex";
+                row.style.flex = "1";
+                row.style.width = "100%";
+                row.style.height = "100%";
+                row.style.minHeight = "0";
+                parentHost.appendChild(row);
+            }
+            mountPoint = row;
+        } else {
+            mountPoint = parentHost.querySelector('[data-children]') || parentHost;
+        }
+
+        if (host.parentElement !== mountPoint) {
+            mountPoint.appendChild(host);
+        }
+    }
+
+    function pruneEmptyRows() {
+        const rows = root.querySelectorAll("[data-row]");
+        for (const row of rows) {
+            if (!row.children.length) row.remove();
+        }
+    }
+
+    function cleanup(key) {
+        if (key === "root") return;
+
+        const prefixA = key + '/';
+        const prefixB = key + '~';
+
+        for (const k of Object.keys(live)) {
+            if (k === "root") continue;
+            if (k === key || k.startsWith(prefixA) || k.startsWith(prefixB)) {
+                live[k]?.remove();
+                delete live[k];
+                document.getElementById('css-' + k)?.remove();
+                delete jsHashes[k];
+            }
+        }
+
+        pruneEmptyRows();
+    }
+
+    function quickHash(str) {
+        let h = 0;
+        for (let i = 0; i < str.length; i++) {
+            h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+        }
+        return h;
+    }
+
+    function parseMaybeJSON(v) {
+        if (typeof v !== 'string') return v;
+        const t = v.trim();
+        if (!t) return v;
+        if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+            try {
+                return JSON.parse(t);
+            } catch (_) {
+            }
+        }
+        return v;
+    }
+
+    function applyBindings(host, resolved) {
+
+        const nodes = host.querySelectorAll("[data-bind-text],[data-bind-html],[data-bind-style]");
+
+        for (const el of nodes) {
+
+            const textKey = el.dataset.bindText;
+            const htmlKey = el.dataset.bindHtml;
+            const styleSpec = el.dataset.bindStyle;
+
+            if (textKey && resolved[textKey] !== undefined) {
+                el.textContent = resolved[textKey];
+            }
+
+            if (htmlKey && resolved[htmlKey] !== undefined) {
+                el.innerHTML = resolved[htmlKey];
+            }
+
+            if (styleSpec) {
+                const pairs = styleSpec.split(";").map(x => x.trim()).filter(Boolean);
+
+                for (const pair of pairs) {
+
+                    const [cssProp, key] = pair.split(":").map(x => x.trim());
+
+                    if (!cssProp || !key) continue;
+
+                    if (resolved[key] !== undefined) {
+                        el.style[cssProp] = resolved[key];
+                    }
+                }
+            }
+        }
+    }
+
+    async function renderResolved(data, key, resolved) {
+        if (!resolved) return;
+
+        if (resolved.css !== undefined && resolved.css !== null) {
+            let s = document.getElementById('css-' + key);
+            if (!s) {
+                s = document.createElement('style');
+                s.id = 'css-' + key;
+                document.head.appendChild(s);
+            }
+            s.textContent = resolved.css;
+        }
+
+        if (resolved.html !== undefined && resolved.html !== null) {
+            const host = ensureHost(key, resolved, data);
+            restyleHost(host, key, resolved, data);
+
+            if (!host._mounted) {
+                host.innerHTML = resolved.html;
+                host._mounted = true;
+            }
+
+            applyBindings(host, resolved);
+        }
+        if (resolved.js !== undefined && resolved.js !== null) {
+            const h = quickHash(resolved.js);
+            if (jsHashes[key] !== h) {
+                jsHashes[key] = h;
+                try {
+                    await new AF(resolved.js)();
+                } catch (e) {
+                    console.error('[' + key + ']', e);
+                }
+            }
+        }
+    }
+
+    async function render(data, key) {
+        if (!data || key === '_') return;
+
+        if (isCleared(data)) {
+            cleanup(key);
+            return;
+        }
+
+        if (window.$resolveTemplateNode) {
+            window.$resolveTemplateNode(data, async (resolved) => {
+                await renderResolved(data, key, resolved);
+            });
+            return;
+        }
+
+        await renderResolved(data, key, data);
+    }
+
+    scene.map().on((data, key) => render(data, key));
+
+    async function syncFromSnapshot() {
+        try {
+            const resp = await fetch('/' + bucket + '/api/snapshot', {cache: 'no-store'});
+            const snap = await resp.json();
+            if (!snap || typeof snap !== 'object') return;
+
+            const keys = Object.keys(snap).sort((a, b) => {
+                const da = a.replace(/~/g, '/').split('/').length;
+                const db = b.replace(/~/g, '/').split('/').length;
+                return da - db;
+            });
+            const wanted = new Set(keys);
+
+            for (const key of keys) {
+                await render(snap[key], key);
+            }
+
+            // cleanup anything no longer present
+            for (const key of Object.keys(live)) {
+                if (key === "root") continue;
+                if (!wanted.has(key)) cleanup(key);
+            }
+        } catch (e) {
+            console.warn('[snapshot sync] failed:', e);
+        }
+    }
+
+    (async function bootstrap() {
+        await syncFromSnapshot();
+        setInterval(syncFromSnapshot, 250);
+    })();
+</script>
+</body>
+</html>

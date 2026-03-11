@@ -1,0 +1,12 @@
+{
+  "name": "hypercore-relay",
+  "version": "1.0.0",
+  "description": "GunDB relay for the HyperCore Protocol",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "dependencies": {
+    "gun": "^0.2020.1240"
+  }
+}

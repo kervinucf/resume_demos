@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Editor</title>
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+<style>
+  body { margin: 0; display: flex; flex-direction: column; height: 100vh; background: #0a0a0a; color: #ccc; font-family: monospace; }
+  #workspace { display: flex; flex: 1; overflow: hidden; }
+  #live-view { flex: 2; position: relative; background: #000; border-right: 1px solid #333; }
+  #live-view iframe { width: 100%; height: 100%; border: none; }
+
+  #sidebar { flex: 1; display: flex; flex-direction: column; min-width: 320px; max-width: 480px; }
+  #auth-bar { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #222; align-items: center; }
+  #auth-bar input { background: #111; color: #fff; border: 1px solid #333; font-family: inherit; font-size: 10px; padding: 4px 6px; flex: 1; }
+  #auth-bar button { background: #222; border: 1px solid #444; color: #fff; padding: 4px 8px; font-size: 10px; cursor: pointer; font-family: inherit; }
+  #auth-bar button:hover { border-color: #0cf; }
+  .status { font-size: 9px; }
+  .status-open { color: #f97316; }
+  .status-locked { color: #34d399; }
+
+  #keys { flex: 0 0 180px; overflow-y: auto; border-bottom: 1px solid #333; }
+  #keys-header { padding: 8px 12px; font-size: 10px; letter-spacing: 0.2em; color: #555; text-transform: uppercase; border-bottom: 1px solid #222; display: flex; justify-content: space-between; }
+  .kitem { padding: 5px 12px; font-size: 11px; cursor: pointer; border-bottom: 1px solid #111; display: flex; justify-content: space-between; }
+  .kitem:hover { background: #1a1a1a; color: #0cf; }
+  .kitem.active { color: #0cf; border-left: 2px solid #0cf; background: #111; }
+  .kitem .type { font-size: 9px; color: #555; }
+  .kitem .enc { font-size: 9px; color: #f0c040; margin-right: 4px; }
+
+  #editor { flex: 1; overflow-y: auto; padding: 12px; }
+  #editor h3 { font-size: 11px; color: #666; letter-spacing: 0.1em; text-transform: uppercase; margin: 10px 0 4px; }
+  #editor h3:first-child { margin-top: 0; }
+  input, textarea { background: #111; color: #fff; border: 1px solid #333; padding: 0.5rem; font-family: inherit; width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; font-size: 11px; }
+  input:focus, textarea:focus { border-color: #0cf; outline: none; }
+  button { background: #222; color: #fff; border: 1px solid #444; padding: 0.5rem 1rem; cursor: pointer; font-family: inherit; font-size: 11px; }
+  button:hover { background: #0cf; color: #000; }
+
+  #status-bar { height: 32px; background: #111; border-top: 1px solid #333; display: flex; align-items: center; padding: 0 12px; font-size: 10px; color: #444; gap: 16px; }
+</style>
+</head>
+<body>
+
+<div id="workspace">
+  <div id="live-view">
+    <iframe id="shell-frame"></iframe>
+  </div>
+  <div id="sidebar">
+    <div id="auth-bar">
+      <input type="password" id="auth-token" placeholder="write token">
+      <button onclick="setAuth()">LOCK</button>
+      <button onclick="clearAuth()">UNLOCK</button>
+      <span id="auth-status" class="status status-open">OPEN</span>
+    </div>
+    <div id="keys"><div id="keys-header"><span>FRAGMENTS</span><span id="frag-count">0</span></div></div>
+    <div id="editor">
+      <h3>KEY</h3>
+      <input type="text" id="ed-key" placeholder="fragment key">
+      <h3>HTML</h3>
+      <textarea id="ed-html" rows="7"></textarea>
+      <h3>CSS</h3>
+      <textarea id="ed-css" rows="3"></textarea>
+      <h3>JS</h3>
+      <textarea id="ed-js" rows="3"></textarea>
+      <h3>LINKS (JSON)</h3>
+      <textarea id="ed-links" rows="2" placeholder='[{"rel":"stylesheet","href":"..."}]'></textarea>
+      <div style="display:flex;gap:0.5rem;margin-top:8px">
+        <button onclick="pushFrag()">PUSH</button>
+        <button onclick="deleteFrag()" style="border-color:#633;color:#f88">DELETE</button>
+        <button onclick="clearScene()" style="border-color:#633;color:#f88">CLEAR ALL</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span id="stat-frags">-</span>
+  <span id="stat-auth">-</span>
+</div>
+
+<script>
+const bucket = location.pathname.split('/').filter(Boolean)[0] || 'default';
+const api = '/' + bucket;
+document.title = bucket + ' / edit';
+document.getElementById('shell-frame').src = api + '/';
+
+const gun  = Gun({ peers: [location.origin + '/gun'] });
+const node = gun.get(bucket);
+
+let selectedKey = null;
+let authToken = '';
+
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (authToken) h['Authorization'] = 'Bearer ' + authToken;
+  return h;
+}
+
+async function setAuth() {
+  const tok = document.getElementById('auth-token').value.trim();
+  if (!tok) return;
+  authToken = tok;
+  await fetch(`${api}/api/auth`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: tok })
+  });
+  refreshStats();
+}
+
+async function clearAuth() {
+  await fetch(`${api}/api/auth`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: null })
+  });
+  authToken = '';
+  document.getElementById('auth-token').value = '';
+  refreshStats();
+}
+
+async function refreshStats() {
+  try {
+    const s = await (await fetch(`${api}/api/stats`)).json();
+    document.getElementById('stat-frags').textContent = s.fragments + ' fragments';
+    const el = document.getElementById('auth-status');
+    document.getElementById('stat-auth').textContent = s.auth ? 'LOCKED' : 'OPEN';
+    if (s.auth) { el.textContent = 'LOCKED'; el.className = 'status status-locked'; }
+    else { el.textContent = 'OPEN'; el.className = 'status status-open'; }
+  } catch(e) {}
+}
+setInterval(refreshStats, 5000);
+refreshStats();
+
+// --- Reactive fragment list ---
+const frags = {};
+
+node.get('scene').map().on((data, key) => {
+  if (!data || key === '_') return;
+  if (data.remove) {
+    delete frags[key];
+  } else {
+    const types = [];
+    let encrypted = false;
+    for (const f of ['html','css','js','link']) {
+      if (data[f] !== undefined) {
+        types.push(f);
+        if (typeof data[f] === 'string' && data[f].startsWith('SEA{')) encrypted = true;
+      }
+    }
+    frags[key] = { types, data, encrypted };
+  }
+  renderKeys();
+  if (key === selectedKey) loadFrag(key);
+});
+
+function renderKeys() {
+  const container = document.getElementById('keys');
+  const header = container.querySelector('#keys-header');
+  container.innerHTML = '';
+  container.appendChild(header);
+  const sorted = Object.keys(frags).sort();
+  document.getElementById('frag-count').textContent = sorted.length;
+  for (const k of sorted) {
+    const item = document.createElement('div');
+    item.className = 'kitem' + (k === selectedKey ? ' active' : '');
+    const enc = frags[k].encrypted ? '<span class="enc">ENC</span>' : '';
+    item.innerHTML = `<span>${enc}${k}</span><span class="type">${frags[k].types.join(' ')}</span>`;
+    item.onclick = () => selectKey(k);
+    container.appendChild(item);
+  }
+}
+
+function selectKey(k) {
+  selectedKey = k;
+  document.getElementById('ed-key').value = k;
+  loadFrag(k);
+  renderKeys();
+}
+
+function loadFrag(k) {
+  const d = frags[k]?.data || {};
+  document.getElementById('ed-html').value = d.html || '';
+  document.getElementById('ed-css').value = d.css || '';
+  document.getElementById('ed-js').value = d.js || '';
+  document.getElementById('ed-links').value = d.link || '';
+}
+
+function pushFrag() {
+  const key = document.getElementById('ed-key').value.trim();
+  if (!key) return;
+  const payload = {};
+  const html = document.getElementById('ed-html').value;
+  const css = document.getElementById('ed-css').value;
+  const js = document.getElementById('ed-js').value;
+  const links = document.getElementById('ed-links').value.trim();
+  if (html) payload.html = html;
+  if (css) payload.css = css;
+  if (js) payload.js = js;
+  if (links) {
+    try { JSON.parse(links); payload.link = links; }
+    catch(e) { alert('Invalid JSON in links'); return; }
+  }
+  fetch(`${api}/scene/${key}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payload) });
+}
+
+function deleteFrag() {
+  const key = document.getElementById('ed-key').value.trim();
+  if (key) fetch(`${api}/scene/${key}`, { method: 'DELETE', headers: authHeaders() });
+}
+
+function clearScene() {
+  if (confirm('Clear all fragments?'))
+    fetch(`${api}/api/clear`, { method: 'POST', headers: authHeaders() });
+}
+</script>
+</body>
+</html>
