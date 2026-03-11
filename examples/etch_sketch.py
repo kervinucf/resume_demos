@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 
 from PIL import Image, ImageColor, ImageDraw
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 CANVAS_W = 1200
 CANVAS_H = 760

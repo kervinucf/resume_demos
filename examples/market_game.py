@@ -2,7 +2,7 @@
 import time
 import random
 import json
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 hc = HyperClient(relay="http://localhost:8765", root="demo_market")
 hc.start_relay()

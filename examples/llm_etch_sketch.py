@@ -13,7 +13,7 @@ from html import escape
 import requests
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, ImageStat
 
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 # ---------------------------------
 # Config

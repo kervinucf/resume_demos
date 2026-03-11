@@ -2,7 +2,7 @@
 import json
 import time
 import requests
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 MODEL_A = "qwen2.5:3b"
 MODEL_B = "gemma3:4b"

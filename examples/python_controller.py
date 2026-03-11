@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import time
 from random import choice
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 hc = HyperClient(relay="http://localhost:8765", root="demo_move_slider")
 hc.start_relay()

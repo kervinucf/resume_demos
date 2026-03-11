@@ -4,7 +4,7 @@ import re
 import time
 import requests
 import chess
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 # -----------------------------
 # Config

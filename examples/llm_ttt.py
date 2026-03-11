@@ -3,7 +3,7 @@ import json
 import re
 import time
 import requests
-from HyperCoreSDK import HyperClient
+from client import HyperClient
 
 # -----------------------------
 # Config
