@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Chat — dead simple, three discovery modes.
+Chat — two flags, that's it.
 
-    python chat.py                                        # local only
-    python chat.py --discovery lan                        # anyone on LAN
-    python chat.py --discovery trusted --peers 10.0.0.5   # explicit peers
+    python chat.py                                              # local, auto-host
+    python chat.py --discovery lan                              # LAN, auto-promote if needed
+    python chat.py --discovery lan --relay host                 # LAN, always be the server
+    python chat.py --discovery lan --relay join                 # LAN, join only, fail if no server
+    python chat.py --discovery trusted --peers 10.0.0.5        # explicit peer list
 """
 
 import argparse
@@ -13,25 +15,30 @@ import time
 from HyperCoreSDK.client import HyperClient
 
 # ------------------------------------------------------------------
-# Args
+# Args — two flags
 # ------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="HyperChat")
-parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
-parser.add_argument("--peers", nargs="*", default=[], help="peer addresses for trusted mode")
+parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"],
+                    help="who can talk: local | lan | trusted")
+parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"],
+                    help="your role: auto | host | join")
+parser.add_argument("--peers", nargs="*", default=[],
+                    help="peer addresses for trusted mode (e.g. 10.0.0.5)")
 parser.add_argument("--port", type=int, default=8765)
 parser.add_argument("--root", default="chat")
 args = parser.parse_args()
 
 # ------------------------------------------------------------------
-# Connect — one line, one flag
+# Connect
 # ------------------------------------------------------------------
 hc = HyperClient(
     root=args.root,
     discovery=args.discovery,
+    relay=args.relay,
     peers=[f"http://{p}:{args.port}" for p in args.peers],
     port=args.port,
 )
-hc.start_relay()
+hc.connect()
 hc.clear()
 
 # ------------------------------------------------------------------
@@ -81,8 +88,11 @@ CHAT_JS = r"""
 # ------------------------------------------------------------------
 # Mount
 # ------------------------------------------------------------------
+role = "hosting" if hc.is_hosting else "joined"
+label = f"{hc.discovery} · {role} · {hc.machine_id[:12]}"
+
 hc.mount("root/chat", html=CHAT_HTML, js=CHAT_JS, fixed=True, layer=10)
-hc.write("root/chat", title="general", mode=f"{hc.discovery} · {hc.machine_id[:12]}")
+hc.write("root/chat", title="general", mode=label)
 
 # ------------------------------------------------------------------
 # Event loop

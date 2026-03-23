@@ -1,18 +1,22 @@
 """
-HyperClient — machine-aware, discovery-scoped, dead simple.
+HyperClient — two flags, dead simple.
 
-Three modes:
-    local    →  loopback only, one machine
-    lan      →  auto-detect LAN IPs, peers find each other
-    trusted  →  explicit peer list you provide
+    discovery   =  who you talk to     (local | lan | trusted)
+    relay       =  your role           (auto | host | join)
 
-Usage stays the same:
-    hc = HyperClient(root="my_app")                          # local
-    hc = HyperClient(root="my_app", discovery="lan")         # LAN
-    hc = HyperClient(root="my_app", discovery="trusted",     # explicit
+    auto   →  look for an existing relay. if nobody's home, become the relay.
+    host   →  always start the relay. you ARE the server.
+    join   →  never start a relay. just connect. fail if nobody's there.
+
+Examples:
+    hc = HyperClient(root="chat")                                     # local, auto
+    hc = HyperClient(root="chat", discovery="lan")                    # LAN, auto-promote
+    hc = HyperClient(root="chat", discovery="lan", relay="host")      # LAN, always host
+    hc = HyperClient(root="chat", discovery="lan", relay="join")      # LAN, join only
+    hc = HyperClient(root="chat", discovery="trusted",                # explicit peers
                       peers=["http://10.0.0.5:8765"])
 
-    hc.start_relay()
+    hc.connect()
     hc.mount("root/chat", html="...", js="...", layer=10)
     hc.write("root/chat", title="general")
     snap = hc.snapshot()
@@ -47,13 +51,14 @@ log = logging.getLogger(__name__)
 class HyperClient:
     def __init__(
         self,
-        relay: Optional[str] = None,
+        relay_url: Optional[str] = None,
         root: str = "default",
         token: Optional[str] = None,
         relay_script: Optional[str] = None,
-        # --- discovery ---
-        discovery: str = "local",           # local | lan | trusted
-        peers: Optional[List[str]] = None,  # only used when discovery="trusted"
+        # --- two flags ---
+        discovery: str = "local",       # local | lan | trusted
+        relay: str = "auto",            # auto | host | join
+        peers: Optional[List[str]] = None,
         port: int = 8765,
         machine_name: Optional[str] = None,
     ):
@@ -61,25 +66,63 @@ class HyperClient:
         self.token = token
         self.port = int(port)
         self.discovery = discovery.lower()
+        self.relay_mode = relay.lower()
         self._proc = None
+        self._hosting = False
         self._relay_script = relay_script or str(
             Path(__file__).resolve().parent / "src" / "relay.js"
         )
 
-        # --- machine identity ---
+        # machine identity
         self.machine_id = os.getenv("HYPER_MACHINE_ID") or self._make_machine_id()
         self.machine_name = machine_name or socket.gethostname()
 
-        # --- relay URL ---
-        if relay:
-            self.relay = relay.rstrip("/")
-        elif self.discovery == "local":
-            self.relay = f"http://127.0.0.1:{self.port}"
+        # where we send HTTP — always 127.0.0.1 (connectable on every OS)
+        if relay_url:
+            self.relay_url = relay_url.rstrip("/")
         else:
-            self.relay = f"http://0.0.0.0:{self.port}"
+            self.relay_url = f"http://127.0.0.1:{self.port}"
 
-        # --- peers ---
+        # who Gun peers with
         self.peers = self._resolve_peers(peers or [])
+
+    # ------------------------------------------------------------------
+    # The one method you call
+    # ------------------------------------------------------------------
+
+    def connect(self) -> None:
+        """
+        Connect to the network.
+
+            auto  →  try peers first, if nobody's there, become the relay
+            host  →  start the relay, period
+            join  →  connect to an existing relay, fail if none found
+        """
+        if self.relay_mode == "host":
+            self._start_relay()
+            return
+
+        if self.relay_mode == "join":
+            if not self._peer_is_alive():
+                raise RuntimeError(
+                    f"No relay found at {self.relay_url} and relay='join' — "
+                    f"nothing to connect to. Use relay='auto' or relay='host'."
+                )
+            log.info("joined existing relay at %s", self.relay_url)
+            self._register()
+            return
+
+        # auto — try to find someone, otherwise become the someone
+        if self._peer_is_alive():
+            log.info("found existing relay at %s — joining", self.relay_url)
+            self._register()
+        else:
+            log.info("no relay found — promoting to host")
+            self._start_relay()
+
+    # backward compat alias
+    def start_relay(self) -> None:
+        self.connect()
 
     # ------------------------------------------------------------------
     # Properties
@@ -87,14 +130,18 @@ class HyperClient:
 
     @property
     def base(self):
-        return f"{self.relay}/{self.root}"
+        return f"{self.relay_url}/{self.root}"
 
     @property
     def gun_relay(self):
-        return f"{self.relay}/gun"
+        return f"{self.relay_url}/gun"
+
+    @property
+    def is_hosting(self) -> bool:
+        return self._hosting
 
     # ------------------------------------------------------------------
-    # Discovery — figure out who we talk to
+    # Discovery — who we talk to
     # ------------------------------------------------------------------
 
     def _resolve_peers(self, explicit: List[str]) -> List[str]:
@@ -105,25 +152,21 @@ class HyperClient:
             hosts = self._lan_hosts()
             return [f"http://{h}:{self.port}/gun" for h in hosts]
 
-        # local — just the loopback
+        # local
         return [f"http://127.0.0.1:{self.port}/gun"]
 
     def _lan_hosts(self) -> List[str]:
-        """Best-effort LAN address detection. Returns unique list."""
         found: List[str] = []
 
-        # env override
         env = os.getenv("HYPER_ADVERTISE_HOST")
         if env:
             found.append(env)
 
-        # hostname variants
         hostname = socket.gethostname()
         if hostname:
             found.append(hostname)
             found.append(f"{hostname}.local")
 
-        # all addresses for this hostname
         try:
             for addr in socket.gethostbyname_ex(hostname)[2]:
                 if self._is_private(addr):
@@ -131,7 +174,6 @@ class HyperClient:
         except OSError:
             pass
 
-        # UDP trick — no data sent, just discovers active interface
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -142,7 +184,6 @@ class HyperClient:
         except OSError:
             pass
 
-        # dedupe, preserve order
         seen, out = set(), []
         for h in found:
             h = h.strip()
@@ -152,7 +193,7 @@ class HyperClient:
         return out or ["127.0.0.1"]
 
     # ------------------------------------------------------------------
-    # Display API  (same surface as always)
+    # Display API
     # ------------------------------------------------------------------
 
     def mount(self, key: str, *, html: str = "", css: str = "", js: str = "",
@@ -185,15 +226,16 @@ class HyperClient:
         return self._get("api/keys") or []
 
     # ------------------------------------------------------------------
-    # Machine registry — machines announce themselves in the graph
+    # Machine registry
     # ------------------------------------------------------------------
 
-    def register(self) -> None:
-        """Write this machine's identity into the shared graph."""
+    def _register(self) -> None:
         info = {
             "machine_id": self.machine_id,
             "name": self.machine_name,
             "discovery": self.discovery,
+            "relay_mode": self.relay_mode,
+            "hosting": self._hosting,
             "peers": json.dumps(self.peers),
             "started_at": time.time(),
         }
@@ -205,7 +247,6 @@ class HyperClient:
                    status="online", last_seen=time.time())
 
     def machines(self) -> Dict[str, Any]:
-        """Return snapshot of all registered machines."""
         snap = self.snapshot()
         out = {}
         for k, v in snap.items():
@@ -215,10 +256,10 @@ class HyperClient:
         return out
 
     # ------------------------------------------------------------------
-    # Relay process
+    # Relay process management
     # ------------------------------------------------------------------
 
-    def start_relay(self) -> None:
+    def _start_relay(self) -> None:
         if self._proc and self._proc.poll() is None:
             return
 
@@ -228,12 +269,7 @@ class HyperClient:
         env["HYPER_MACHINE_NAME"] = self.machine_name
         env["HYPER_DISCOVERY"] = self.discovery
         env["HYPER_PEERS"] = json.dumps(self.peers)
-
-        # bind host depends on scope
-        if self.discovery == "local":
-            env["HYPER_BIND_HOST"] = "127.0.0.1"
-        else:
-            env["HYPER_BIND_HOST"] = "0.0.0.0"
+        env["HYPER_BIND_HOST"] = "127.0.0.1" if self.discovery == "local" else "0.0.0.0"
 
         self._proc = subprocess.Popen(
             [self._find_node(), str(self._relay_script)],
@@ -241,10 +277,12 @@ class HyperClient:
         )
         atexit.register(self.stop_relay)
         self._wait_healthy()
-        self.register()
+        self._hosting = True
+        self._register()
 
         log.info("━" * 50)
-        log.info("  %s/%s  [%s]", self.relay, self.root, self.discovery)
+        log.info("  hosting %s/%s", self.relay_url, self.root)
+        log.info("  discovery: %s   relay: %s", self.discovery, self.relay_mode)
         log.info("  machine: %s", self.machine_id)
         log.info("  peers: %s", self.peers)
         log.info("━" * 50)
@@ -253,9 +291,10 @@ class HyperClient:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
         self._proc = None
+        self._hosting = False
 
     # ------------------------------------------------------------------
-    # Runtime JS — what the browser loads to connect
+    # Runtime JS
     # ------------------------------------------------------------------
 
     def load_runtime_js(self) -> str:
@@ -360,17 +399,29 @@ class HyperClient:
             log.error("%s %s → %s", method, path, e)
             return None
 
-    def _wait_healthy(self, timeout=10):
+    def _peer_is_alive(self, timeout: float = 2.0) -> bool:
+        """Can we reach an existing relay?"""
+        try:
+            req = urllib.request.Request(self.relay_url, method="GET")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+                return bool(data.get("relay"))
+        except Exception:
+            pass
+
+        # fallback: raw socket check (Gun sometimes eats the root route)
+        try:
+            s = socket.create_connection(("127.0.0.1", self.port), timeout=timeout)
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    def _wait_healthy(self, timeout: float = 10.0) -> None:
         deadline = time.time() + timeout
         while time.time() < deadline:
-            try:
-                req = urllib.request.Request(self.relay, method="GET")
-                with urllib.request.urlopen(req, timeout=2) as resp:
-                    data = json.loads(resp.read())
-                    if data.get("relay"):
-                        return
-            except Exception:
-                pass
+            if self._peer_is_alive(timeout=1):
+                return
             time.sleep(0.3)
         raise RuntimeError(f"Relay not ready after {timeout}s")
 
@@ -402,7 +453,8 @@ class HyperClient:
                 or addr.startswith("172.") or addr.startswith("169.254."))
 
     def __repr__(self):
-        return f"<HyperClient {self.relay}/{self.root} [{self.discovery}]>"
+        role = "hosting" if self._hosting else "joined"
+        return f"<HyperClient {self.relay_url}/{self.root} [{self.discovery}/{role}]>"
 
 
 class _NodeBuilder:
