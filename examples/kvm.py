@@ -1,852 +1,580 @@
 #!/usr/bin/env python3
-import ctypes
+"""
+HyperFlow KVM — hot-swap Bluetooth devices between machines.
+
+No input interception. No accessibility permissions. No pynput.
+Just tells the Bluetooth adapter to connect or disconnect devices.
+
+    pip install zeroconf
+    Mac:  brew install blueutil
+    Win:  (built-in PowerShell)
+
+    # Machine A (Mac)
+    python -m examples.kvm --discovery lan
+
+    # Machine B (Windows)
+    python -m examples.kvm --discovery lan
+
+    Open http://localhost:8765/kvm on either machine.
+    See every BT device on every machine.
+    Click "Steal" to yank a device to your machine.
+"""
+
+import argparse
 import json
-import os
 import platform
-import queue
-import shutil
-import socket
 import subprocess
-import threading
 import time
-import urllib.error
-import urllib.request
-from collections import deque
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from socketserver import ThreadingMixIn, TCPServer, StreamRequestHandler
+import traceback
+
+from HyperCoreSDK.client import HyperClient
+
+MY_OS = platform.system()  # "Darwin" or "Windows"
+
 
 # ============================================================
-# CONFIG — edit on EACH machine.
-# Same file on both machines, but ROLE / peer IP differ.
-#
-# IMPORTANT
-# - INPUT_OWNER=True only on the machine the physical keyboard/mouse are attached to.
-# - The other machine should use INPUT_OWNER=False.
-# - Switch target with the UI buttons.
-# - Emergency return-to-local hotkey while forwarding: F12
+# Bluetooth backends
 # ============================================================
-ROLE = os.environ.get("KVM_ROLE", "mac").strip().lower()  # mac | windows
-INPUT_OWNER = os.environ.get("KVM_INPUT_OWNER", "true" if ROLE == "mac" else "false").strip().lower() in {"1", "true", "yes", "on"}
 
-RELAY_URL = os.environ.get("KVM_RELAY_URL", "http://localhost:8765")
-ROOT_NAME = os.environ.get("KVM_ROOT_NAME", f"hyper_kvm_{ROLE}")
+def guess_type(name):
+    n = name.lower()
+    for kw in ("keyboard", "keychron", "k380", "k860", "g915", "mx keys", "hhkb"):
+        if kw in n: return "keyboard"
+    for kw in ("mouse", "trackpad", "mx master", "g502", "g pro", "m720", "ergo"):
+        if kw in n: return "mouse"
+    for kw in ("airpod", "headphone", "buds", "speaker", "jabra", "sony wh", "beats"):
+        if kw in n: return "audio"
+    for kw in ("xbox", "controller", "gamepad", "dualsense", "joycon"):
+        if kw in n: return "gamepad"
+    for kw in ("iphone", "ipad", "galaxy", "pixel"):
+        if kw in n: return "phone"
+    return "other"
 
-CONTROL_HOST = os.environ.get("KVM_CONTROL_HOST", "0.0.0.0")
-CONTROL_PORT = int(os.environ.get("KVM_CONTROL_PORT", "8766" if ROLE == "mac" else "8767"))
-INPUT_PORT = int(os.environ.get("KVM_INPUT_PORT", "9966" if ROLE == "mac" else "9967"))
-AUTH_TOKEN = os.environ.get("KVM_AUTH_TOKEN", "change-me")
 
-PEER_HOST = os.environ.get("KVM_PEER_HOST", "192.168.1.50" if ROLE == "mac" else "192.168.1.40")
-PEER_CONTROL_PORT = int(os.environ.get("KVM_PEER_CONTROL_PORT", "8767" if ROLE == "mac" else "8766"))
-PEER_INPUT_PORT = int(os.environ.get("KVM_PEER_INPUT_PORT", "9967" if ROLE == "mac" else "9966"))
-PEER_LABEL = os.environ.get("KVM_PEER_LABEL", "Windows" if ROLE == "mac" else "Mac")
+def dev_icon(t):
+    return {"keyboard": "⌨️", "mouse": "🖱️", "audio": "🎧",
+            "gamepad": "🎮", "phone": "📱"}.get(t, "📶")
 
-SUPPRESS_LOCAL_WHEN_FORWARDING = os.environ.get("KVM_SUPPRESS_LOCAL", "true").strip().lower() in {"1", "true", "yes", "on"}
-CAPTURE_MOUSE = os.environ.get("KVM_CAPTURE_MOUSE", "true").strip().lower() in {"1", "true", "yes", "on"}
-MOUSE_MOVE_MIN_INTERVAL = float(os.environ.get("KVM_MOUSE_INTERVAL", "0.010"))
-PEER_TIMEOUT_SECONDS = float(os.environ.get("KVM_PEER_TIMEOUT", "1.0"))
-HEARTBEAT_INTERVAL_SECONDS = float(os.environ.get("KVM_HEARTBEAT", "3.0"))
-LOOP_SLEEP_SECONDS = float(os.environ.get("KVM_LOOP_SLEEP", "0.08"))
-MAX_LOG_LINES = int(os.environ.get("KVM_MAX_LOG_LINES", "24"))
-EMERGENCY_RETURN_KEY = os.environ.get("KVM_RETURN_KEY", "f12").strip().lower()
 
-if ROLE not in {"mac", "windows"}:
-    raise SystemExit("ROLE must be 'mac' or 'windows'")
+class BT:
+    """Base — no BT support."""
+    def scan(self):       return []
+    def connect(self, a): return False, "no bluetooth backend"
+    def disconnect(self, a): return False, "no bluetooth backend"
+    def label(self):      return "none"
 
-IS_MAC = ROLE == "mac"
-IS_WINDOWS = ROLE == "windows"
-LOCAL_LABEL = "Mac" if IS_MAC else "Windows"
-PEER_ROLE = "windows" if IS_MAC else "mac"
 
-# ============================================================
-# Environment bootstrap
-# ============================================================
-def ensure_node_path() -> str | None:
-    candidates = [shutil.which("node"), "/opt/homebrew/bin/node", "/usr/local/bin/node"]
-    nvm_root = Path.home() / ".nvm/versions/node"
-    if nvm_root.exists():
+class MacBT(BT):
+    """blueutil — brew install blueutil"""
+
+    def label(self): return "blueutil"
+
+    def _blu(self, *args):
         try:
-            for version_dir in sorted(nvm_root.iterdir(), reverse=True):
-                candidates.append(str(version_dir / "bin" / "node"))
-        except Exception:
-            pass
+            out = subprocess.check_output(
+                ["blueutil"] + list(args), timeout=10, text=True,
+                stderr=subprocess.STDOUT)
+            return True, out.strip()
+        except FileNotFoundError:
+            return False, "blueutil not found — run: brew install blueutil"
+        except subprocess.CalledProcessError as e:
+            return False, e.output.strip() if e.output else str(e)
+        except Exception as e:
+            return False, str(e)
 
-    for cand in candidates:
-        if cand and Path(cand).exists():
-            node_path = str(Path(cand).resolve())
-            node_dir = str(Path(node_path).parent)
-            cur = os.environ.get("PATH", "")
-            parts = [p for p in cur.split(os.pathsep) if p]
-            if node_dir not in parts:
-                os.environ["PATH"] = os.pathsep.join([node_dir] + parts)
-            return node_path
-    return None
-
-
-def enable_windows_dpi_awareness() -> None:
-    if not IS_WINDOWS:
-        return
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
+    def scan(self):
+        ok, out = self._blu("--paired", "--format", "json")
+        if not ok:
+            print(f"  blueutil scan failed: {out}")
+            return []
         try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
+            raw = json.loads(out)
+        except json.JSONDecodeError:
+            return []
+        return [{
+            "address": d.get("address", ""),
+            "name":    d.get("name", "Unknown"),
+            "connected": bool(d.get("connected")),
+            "type":    guess_type(d.get("name", "")),
+        } for d in raw if d.get("address")]
+
+    def connect(self, addr):
+        ok, out = self._blu("--connect", addr)
+        if ok:
+            time.sleep(1.5)  # give BT a moment
+            return True, f"connected {addr}"
+        return False, out
+
+    def disconnect(self, addr):
+        ok, out = self._blu("--disconnect", addr)
+        return (True, f"disconnected {addr}") if ok else (False, out)
 
 
-ensure_node_path()
-enable_windows_dpi_awareness()
+class WinBT(BT):
+    """PowerShell — built-in on Windows."""
 
-try:
-    from HyperCoreSDK import HyperClient
-except Exception:
-    from HyperCoreSDK.client import HyperClient
+    def label(self): return "powershell"
 
-from pynput import keyboard as pk
-from pynput import mouse as pm
+    # BLE service names that are NOT real devices
+    JUNK = frozenset({
+        "generic attribute profile", "generic access profile",
+        "device information service", "service discovery service",
+        "bluetooth le generic attribute service",
+        "bluetooth device (rfcomm protocol tdi)",
+        "microsoft bluetooth le enumerator",
+        "microsoft bluetooth enumerator",
+    })
 
-hc = HyperClient(relay=RELAY_URL, root=ROOT_NAME)
+    def scan(self):
+        try:
+            ps = (
+                'Get-PnpDevice -Class Bluetooth,BTHLE -Status OK '
+                '-ErrorAction SilentlyContinue | '
+                'Select-Object FriendlyName,InstanceId,Status | '
+                'ConvertTo-Json -Compress'
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", ps],
+                timeout=15, text=True, stderr=subprocess.DEVNULL)
+            raw = json.loads(out)
+            if isinstance(raw, dict): raw = [raw]
+        except Exception as e:
+            print(f"  powershell scan failed: {e}")
+            return []
+
+        seen = {}
+        for d in raw:
+            name = (d.get("FriendlyName") or "").strip()
+            iid  = (d.get("InstanceId") or "")
+
+            # skip junk
+            if name.lower() in self.JUNK:
+                continue
+            if any(j in name.lower() for j in ("radio", "enumerator")):
+                continue
+            # skip GATT service entries (they have a UUID in the instance ID)
+            if "bthledevice" in iid.lower():
+                continue
+            if not name:
+                continue
+
+            addr = self._addr_from_iid(iid)
+            if not addr:
+                continue
+
+            # dedupe by address — keep shortest/cleanest name
+            if addr in seen:
+                if len(name) < len(seen[addr]["name"]):
+                    seen[addr]["name"] = name
+                continue
+
+            seen[addr] = {
+                "address":   addr,
+                "name":      name,
+                "connected": True,  # Status=OK means it's active
+                "type":      guess_type(name),
+                "iid":       iid,
+            }
+
+        return list(seen.values())
+
+    def connect(self, addr):
+        return self._set_device(addr, enable=True)
+
+    def disconnect(self, addr):
+        return self._set_device(addr, enable=False)
+
+    def _set_device(self, addr, enable=True):
+        verb = "Enable" if enable else "Disable"
+        clean = addr.replace(":", "").replace("-", "").upper()
+        ps = (
+            f'$devs = Get-PnpDevice | Where-Object {{ '
+            f'$_.InstanceId -like "*{clean}*" }}; '
+            f'foreach ($d in $devs) {{ '
+            f'{verb}-PnpDevice -InstanceId $d.InstanceId -Confirm:$false '
+            f'-ErrorAction SilentlyContinue }}'
+        )
+        try:
+            subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", ps],
+                timeout=15, text=True, stderr=subprocess.DEVNULL)
+            return True, f"{verb.lower()}d {addr}"
+        except Exception as e:
+            return False, str(e)
+
+    def _addr_from_iid(self, iid):
+        """Extract a BT MAC address from a PnP InstanceId string."""
+        # Examples:
+        #   BTHLE\DEV_E34BCEC43832\...    → E3:4B:CE:C4:38:32
+        #   BTHENUM\DEV_08FF44207BE0\...  → 08:FF:44:20:7B:E0
+        for part in iid.replace("\\", "/").split("/"):
+            # DEV_XXXXXXXXXXXX pattern
+            if part.upper().startswith("DEV_"):
+                hex_part = part[4:].replace("-", "")
+                if len(hex_part) >= 12 and all(c in "0123456789abcdefABCDEF" for c in hex_part[:12]):
+                    h = hex_part[:12].upper()
+                    return ":".join(h[i:i+2] for i in range(0, 12, 2))
+            # raw 12-hex-digit part
+            clean = part.replace("-", "").replace(":", "")
+            if len(clean) == 12 and all(c in "0123456789abcdefABCDEF" for c in clean):
+                h = clean.upper()
+                return ":".join(h[i:i+2] for i in range(0, 12, 2))
+        return ""
+
+
+def make_bt():
+    if MY_OS == "Darwin":
+        b = MacBT()
+        ok, _ = b._blu("--version")
+        if ok:
+            print(f"bluetooth backend: blueutil (macOS)")
+            return b
+        print("blueutil not found — run: brew install blueutil")
+
+    if MY_OS == "Windows":
+        print(f"bluetooth backend: powershell (Windows)")
+        return WinBT()
+
+    print("no bluetooth backend available")
+    return BT()
+
 
 # ============================================================
-# State
+# Hyper graph helpers
 # ============================================================
-state_lock = threading.RLock()
-log_lines = deque(maxlen=MAX_LOG_LINES)
-processed_actions = deque(maxlen=500)
-processed_actions_set = set()
-ui_dirty = True
+# The relay only keeps snapshot entries with CONTENT_FIELDS:
+#   html, css, js, data, meta, links, actions, layer, fixed, portal, ...
+# Arbitrary fields like name=, os= get silently dropped.
+# So ALL machine data must go through data=json.dumps({...}).
 
-state = {
-    "target_role": ROLE,
-    "peer_online": False,
-    "peer_status": "Unknown",
-    "peer_seen": "Never",
-    "forwarding": False,
-    "capture": "Idle",
-    "transport": "Disconnected",
-    "last_error": "None",
-    "last_action": "Starting",
-}
+def pack(obj):
+    """Wrap a dict in the data field for the relay."""
+    return json.dumps(obj)
 
-shutdown_event = threading.Event()
-outgoing_events: queue.Queue[dict] = queue.Queue(maxsize=4000)
-peer_socket_lock = threading.Lock()
-peer_socket = None
-keyboard_listener = None
-mouse_listener = None
-last_mouse_move_sent = 0.0
+def unpack(snap_val):
+    """Read a data-field entry back out."""
+    if not isinstance(snap_val, dict):
+        return {}
+    raw = snap_val.get("data", "{}")
+    if isinstance(raw, str):
+        try: return json.loads(raw)
+        except: return {}
+    return raw if isinstance(raw, dict) else {}
 
-key_controller = pk.Controller()
-mouse_controller = pm.Controller()
 
 # ============================================================
-# UI
+# UI templates
 # ============================================================
-APP_HTML = """
-<div style="width:100%;height:100%;display:flex;flex-direction:column;background:#0f172a;color:#e2e8f0;font-family:Arial,sans-serif">
-  <div style="padding:18px 20px;border-bottom:1px solid #334155;background:#111827;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
-    <div>
-      <div style="font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Peer KVM Switcher</div>
-      <div data-bind-text="title" style="font-size:24px;font-weight:800;margin-top:6px"></div>
-      <div data-bind-text="subtitle" style="font-size:13px;color:#cbd5e1;margin-top:6px;line-height:1.45"></div>
+
+DASH_HTML = """
+<div style="width:100%;height:100%;background:#09090b;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;flex-direction:column">
+  <div style="padding:20px 24px;background:#18181b;border-bottom:1px solid #27272a;display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;align-items:center;gap:14px">
+      <div style="font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent">HYPERFLOW</div>
+      <div style="font-size:12px;color:#71717a;background:#27272a;padding:5px 12px;border-radius:6px" data-bind-text="status">starting...</div>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button id="btn_mac" style="padding:12px 18px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700">Use Mac</button>
-      <button id="btn_windows" style="padding:12px 18px;background:#16a34a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700">Use Windows</button>
-      <button id="btn_local" style="padding:12px 18px;background:#475569;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700">Return Local</button>
-      <button id="btn_ping" style="padding:12px 18px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700">Peer Ping</button>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button id="btn_scan" style="padding:7px 16px;background:#27272a;color:#a78bfa;border:1px solid #3f3f46;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">↻ Rescan All</button>
+      <div style="font-size:11px;color:#52525b" data-bind-text="me"></div>
     </div>
   </div>
-
-  <div style="display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:12px;padding:16px 20px;border-bottom:1px solid #334155;background:#0b1220">
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">This machine</div>
-      <div data-bind-text="local_label" style="font-size:22px;font-weight:800;margin-top:6px"></div>
-    </div>
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Input owner</div>
-      <div data-bind-text="input_owner" style="font-size:22px;font-weight:800;margin-top:6px"></div>
-    </div>
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Active target</div>
-      <div data-bind-text="active_target" style="font-size:22px;font-weight:800;margin-top:6px"></div>
-    </div>
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Forwarding</div>
-      <div data-bind-text="forwarding" style="font-size:14px;font-weight:800;margin-top:6px;line-height:1.35"></div>
-    </div>
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Peer</div>
-      <div data-bind-text="peer_status" style="font-size:14px;font-weight:800;margin-top:6px;line-height:1.35"></div>
-    </div>
-    <div style="background:#111827;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Transport</div>
-      <div data-bind-text="transport" style="font-size:14px;font-weight:800;margin-top:6px;line-height:1.35"></div>
-    </div>
+  <div style="flex:1;overflow:auto;padding:24px">
+    <div data-children style="display:flex;flex-direction:column;gap:20px"></div>
   </div>
-
-  <div style="padding:14px 20px;border-bottom:1px solid #334155;background:#111827;display:flex;flex-direction:column;gap:8px">
-    <div data-bind-text="help_text" style="font-size:13px;color:#cbd5e1;line-height:1.55;white-space:pre-wrap"></div>
-    <div data-bind-text="error_text" style="font-size:12px;color:#fca5a5;line-height:1.5;white-space:pre-wrap"></div>
+  <div style="padding:14px 24px;background:#18181b;border-top:1px solid #27272a;display:flex;justify-content:space-between;align-items:center">
+    <div style="font-size:12px;color:#52525b" data-bind-text="log">ready</div>
+    <div style="font-size:11px;color:#3f3f46" data-bind-text="ts"></div>
   </div>
-
-  <div style="padding:12px 20px 8px 20px;font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.14em">Recent activity</div>
-  <pre data-bind-text="activity" style="flex:1;min-height:0;overflow:auto;margin:0 20px 20px 20px;padding:14px;background:#111827;border:1px solid #334155;border-radius:10px;color:#cbd5e1;font-size:12px;line-height:1.5;white-space:pre-wrap"></pre>
 </div>
 """
 
-APP_JS = r"""
+DASH_JS = r"""
 (function(){
-  const macBtn = document.getElementById("btn_mac");
-  const winBtn = document.getElementById("btn_windows");
-  const localBtn = document.getElementById("btn_local");
-  const pingBtn = document.getElementById("btn_ping");
-  if (!macBtn || !winBtn || !localBtn || !pingBtn || macBtn.dataset.on) return;
-  macBtn.dataset.on = "1";
-
-  window.sendAction = (type, payload = {}) => {
-    const path = "inbox/" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
-    window.$scene.get(path).put({
-      data: JSON.stringify({ type, ...payload, ts: Date.now() })
+  if(document.getElementById("_hf"))return;
+  var m=document.createElement("div");m.id="_hf";m.style.display="none";document.body.appendChild(m);
+  window.hf=function(action,machine,addr){
+    window.$scene.get("inbox/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)).put({
+      data:JSON.stringify({type:action,machine:machine,address:addr})
     });
   };
-
-  macBtn.onclick = () => window.sendAction("switch_target", { target: "mac" });
-  winBtn.onclick = () => window.sendAction("switch_target", { target: "windows" });
-  localBtn.onclick = () => window.sendAction("return_local");
-  pingBtn.onclick = () => window.sendAction("probe_peer");
+  var b=document.getElementById("btn_scan");
+  if(b&&!b.dataset.on){b.dataset.on=1;b.onclick=function(){window.hf("rescan","","");};}
 })();
 """
 
-# ============================================================
-# Helpers
-# ============================================================
-def now_label() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+MACHINE_HTML = """
+<div style="background:#18181b;border:1px solid #27272a;border-radius:12px;overflow:hidden">
+  <div style="padding:16px 20px;background:#1c1c1f;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #27272a">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div data-bind-text="icon" style="font-size:22px"></div>
+      <div>
+        <div data-bind-text="mname" style="font-weight:700;font-size:16px"></div>
+        <div data-bind-text="msub" style="font-size:11px;color:#52525b;margin-top:2px"></div>
+      </div>
+    </div>
+    <div data-bind-text="badge" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;background:#27272a;color:#a78bfa"></div>
+  </div>
+  <div data-children style="display:flex;flex-direction:column"></div>
+</div>
+"""
 
 
-def log(message: str) -> None:
-    global ui_dirty
-    with state_lock:
-        log_lines.appendleft(f"[{now_label()}] {message}")
-        ui_dirty = True
-    print(message, flush=True)
+def device_row(dev, machine_id, is_me):
+    addr = dev.get("address", "?")
+    name = dev.get("name", "Unknown")
+    conn = dev.get("connected", False)
+    icon = dev_icon(dev.get("type", "other"))
+    dot  = "#4ade80" if conn else "#52525b"
+    txt  = "connected" if conn else "paired"
 
-
-def set_state(**kwargs) -> None:
-    global ui_dirty
-    with state_lock:
-        for k, v in kwargs.items():
-            state[k] = v
-        ui_dirty = True
-
-
-def get_screen_size() -> tuple[int, int]:
-    if IS_WINDOWS:
-        try:
-            user32 = ctypes.windll.user32
-            return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
-        except Exception:
-            pass
-    if IS_MAC:
-        try:
-            from AppKit import NSScreen  # type: ignore
-            frame = NSScreen.mainScreen().frame()
-            return int(frame.size.width), int(frame.size.height)
-        except Exception:
-            pass
-    try:
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        w = int(root.winfo_screenwidth())
-        h = int(root.winfo_screenheight())
-        root.destroy()
-        return w, h
-    except Exception:
-        return 1920, 1080
-
-
-SCREEN_W, SCREEN_H = get_screen_size()
-
-
-def key_token(key) -> str:
-    if isinstance(key, pk.KeyCode):
-        if key.char:
-            return key.char.lower()
-        if key.vk is not None:
-            return f"vk:{key.vk}"
-        return "keycode"
-    if isinstance(key, pk.Key):
-        name = getattr(key, "name", None)
-        if name in {"ctrl_l", "ctrl_r", "ctrl"}:
-            return "ctrl"
-        if name in {"alt_l", "alt_r", "alt", "alt_gr"}:
-            return "alt"
-        if name in {"cmd", "cmd_l", "cmd_r"}:
-            return "cmd"
-        if name in {"shift", "shift_l", "shift_r"}:
-            return "shift"
-        return name or str(key)
-    return str(key)
-
-
-def serialize_key(key) -> dict:
-    if isinstance(key, pk.KeyCode):
-        if key.char is not None:
-            return {"kind": "char", "char": key.char}
-        if key.vk is not None:
-            return {"kind": "vk", "vk": int(key.vk)}
-        raise ValueError("Unsupported KeyCode")
-    if isinstance(key, pk.Key):
-        return {"kind": "special", "name": getattr(key, "name", str(key))}
-    raise ValueError(f"Unsupported key type: {type(key)}")
-
-
-def deserialize_key(data: dict):
-    kind = data.get("kind")
-    if kind == "char":
-        return pk.KeyCode.from_char(data["char"])
-    if kind == "vk":
-        return pk.KeyCode.from_vk(int(data["vk"]))
-    if kind == "special":
-        name = data["name"]
-        if hasattr(pk.Key, name):
-            return getattr(pk.Key, name)
-        raise ValueError(f"Unknown special key: {name}")
-    raise ValueError(f"Unknown key kind: {kind}")
-
-
-def serialize_button(button) -> str:
-    return getattr(button, "name", str(button).split(".")[-1])
-
-
-def deserialize_button(name: str):
-    if hasattr(pm.Button, name):
-        return getattr(pm.Button, name)
-    raise ValueError(f"Unknown mouse button: {name}")
-
-
-def auth_headers() -> dict:
-    return {"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"}
-
-
-def urlopen_json(url: str, method: str = "GET", payload: dict | None = None, timeout: float = PEER_TIMEOUT_SECONDS) -> dict:
-    data = None
-    headers = {}
-    if payload is not None:
-        data = json.dumps(payload).encode("utf-8")
-        headers.update(auth_headers())
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    if payload is None and AUTH_TOKEN:
-        req.add_header("Authorization", f"Bearer {AUTH_TOKEN}")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read().decode("utf-8")
-    return json.loads(body) if body else {}
-
-
-def check_auth(header_value: str | None) -> bool:
-    if not AUTH_TOKEN:
-        return True
-    return header_value == f"Bearer {AUTH_TOKEN}"
-
-
-def peer_control_url(path: str) -> str:
-    return f"http://{PEER_HOST}:{PEER_CONTROL_PORT}{path}"
-
-
-def current_target_label() -> str:
-    with state_lock:
-        return "Mac" if state["target_role"] == "mac" else "Windows"
-
-# ============================================================
-# Capture + injection
-# ============================================================
-def clear_outgoing_queue() -> None:
-    while True:
-        try:
-            outgoing_events.get_nowait()
-        except queue.Empty:
-            break
-
-
-def close_peer_socket() -> None:
-    global peer_socket
-    with peer_socket_lock:
-        if peer_socket is not None:
-            try:
-                peer_socket.close()
-            except Exception:
-                pass
-            peer_socket = None
-    set_state(transport="Disconnected")
-
-
-def ensure_peer_socket() -> socket.socket:
-    global peer_socket
-    with peer_socket_lock:
-        if peer_socket is not None:
-            return peer_socket
-        sock = socket.create_connection((PEER_HOST, PEER_INPUT_PORT), timeout=PEER_TIMEOUT_SECONDS)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        peer_socket = sock
-        set_state(transport=f"Connected → {PEER_LABEL}:{PEER_INPUT_PORT}")
-        return peer_socket
-
-
-def send_event_nonblocking(event: dict) -> None:
-    try:
-        outgoing_events.put_nowait(event)
-    except queue.Full:
-        if event.get("t") != "mm":
-            log("Dropped input event because outgoing queue is full")
-
-
-def sender_worker() -> None:
-    while not shutdown_event.is_set():
-        try:
-            event = outgoing_events.get(timeout=0.25)
-        except queue.Empty:
-            continue
-
-        with state_lock:
-            should_forward = INPUT_OWNER and state["target_role"] != ROLE
-
-        if not should_forward:
-            continue
-
-        try:
-            sock = ensure_peer_socket()
-            payload = (json.dumps(event) + "\n").encode("utf-8")
-            sock.sendall(payload)
-        except Exception as exc:
-            close_peer_socket()
-            set_state(last_error=f"Send failed: {exc}", transport="Disconnected")
-            log(f"Input transport error: {exc}")
-
-
-def inject_event(event: dict) -> None:
-    t = event.get("t")
-    if t == "kp":
-        key_controller.press(deserialize_key(event["key"]))
-    elif t == "kr":
-        key_controller.release(deserialize_key(event["key"]))
-    elif t == "mm":
-        nx = max(0.0, min(1.0, float(event.get("nx", 0.0))))
-        ny = max(0.0, min(1.0, float(event.get("ny", 0.0))))
-        x = int(nx * max(1, SCREEN_W - 1))
-        y = int(ny * max(1, SCREEN_H - 1))
-        mouse_controller.position = (x, y)
-    elif t == "mc":
-        nx = max(0.0, min(1.0, float(event.get("nx", 0.0))))
-        ny = max(0.0, min(1.0, float(event.get("ny", 0.0))))
-        mouse_controller.position = (int(nx * max(1, SCREEN_W - 1)), int(ny * max(1, SCREEN_H - 1)))
-        button = deserialize_button(event["button"])
-        if event.get("pressed"):
-            mouse_controller.press(button)
-        else:
-            mouse_controller.release(button)
-    elif t == "ms":
-        mouse_controller.scroll(int(event.get("dx", 0)), int(event.get("dy", 0)))
+    # buttons depend on context
+    if is_me and conn:
+        btn = (f'<button onclick="window.hf(\'disconnect\',\'{machine_id}\',\'{addr}\')" '
+               f'style="padding:5px 12px;background:transparent;color:#f87171;border:1px solid #7f1d1d;'
+               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">Disconnect</button>')
+    elif is_me and not conn:
+        btn = (f'<button onclick="window.hf(\'connect\',\'{machine_id}\',\'{addr}\')" '
+               f'style="padding:5px 12px;background:#6d28d9;color:#fff;border:none;'
+               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">Connect</button>')
+    elif not is_me and conn:
+        btn = (f'<button onclick="window.hf(\'steal\',\'{machine_id}\',\'{addr}\')" '
+               f'style="padding:5px 12px;background:#d97706;color:#000;border:none;'
+               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:700">⚡ Steal</button>')
     else:
-        raise ValueError(f"Unknown event type: {t}")
+        btn = ''
 
+    return f'''<div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1c1c1f">
+  <div style="display:flex;align-items:center;gap:12px">
+    <span style="font-size:18px">{icon}</span>
+    <div>
+      <div style="font-size:13px;font-weight:500;color:#e4e4e7">{name}</div>
+      <div style="font-size:10px;color:#52525b;font-family:monospace">{addr}</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="display:flex;align-items:center;gap:5px">
+      <div style="width:7px;height:7px;border-radius:50%;background:{dot}"></div>
+      <span style="font-size:11px;color:{dot}">{txt}</span>
+    </div>
+    {btn}
+  </div>
+</div>'''
 
-class InputHandler(StreamRequestHandler):
-    def handle(self):
-        while not shutdown_event.is_set():
-            line = self.rfile.readline()
-            if not line:
-                break
-            try:
-                event = json.loads(line.decode("utf-8"))
-                inject_event(event)
-            except Exception as exc:
-                log(f"Inject error: {exc}")
-
-
-class ThreadedTCPServer(ThreadingMixIn, TCPServer):
-    daemon_threads = True
-    allow_reuse_address = True
-
-
-def start_input_server() -> ThreadedTCPServer:
-    server = ThreadedTCPServer((CONTROL_HOST, INPUT_PORT), InputHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server
-
-
-capture_pressed_tokens = set()
-
-
-def on_press(key):
-    token = key_token(key)
-    capture_pressed_tokens.add(token)
-
-    if token == EMERGENCY_RETURN_KEY:
-        log(f"Emergency return hotkey ({EMERGENCY_RETURN_KEY})")
-        switch_target(ROLE, source="hotkey", notify_peer=True)
-        return
-
-    try:
-        payload = {"t": "kp", "key": serialize_key(key)}
-    except Exception:
-        return
-    send_event_nonblocking(payload)
-
-
-def on_release(key):
-    token = key_token(key)
-    capture_pressed_tokens.discard(token)
-
-    if token == EMERGENCY_RETURN_KEY:
-        return
-
-    try:
-        payload = {"t": "kr", "key": serialize_key(key)}
-    except Exception:
-        return
-    send_event_nonblocking(payload)
-
-
-def on_move(x, y):
-    global last_mouse_move_sent
-    now = time.monotonic()
-    if (now - last_mouse_move_sent) < MOUSE_MOVE_MIN_INTERVAL:
-        return
-    last_mouse_move_sent = now
-    send_event_nonblocking({
-        "t": "mm",
-        "nx": max(0.0, min(1.0, float(x) / max(1, SCREEN_W - 1))),
-        "ny": max(0.0, min(1.0, float(y) / max(1, SCREEN_H - 1))),
-    })
-
-
-def on_click(x, y, button, pressed):
-    send_event_nonblocking({
-        "t": "mc",
-        "nx": max(0.0, min(1.0, float(x) / max(1, SCREEN_W - 1))),
-        "ny": max(0.0, min(1.0, float(y) / max(1, SCREEN_H - 1))),
-        "button": serialize_button(button),
-        "pressed": bool(pressed),
-    })
-
-
-def on_scroll(x, y, dx, dy):
-    send_event_nonblocking({"t": "ms", "dx": int(dx), "dy": int(dy)})
-
-
-def stop_listeners() -> None:
-    global keyboard_listener, mouse_listener
-    if keyboard_listener is not None:
-        try:
-            keyboard_listener.stop()
-        except Exception:
-            pass
-        keyboard_listener = None
-    if mouse_listener is not None:
-        try:
-            mouse_listener.stop()
-        except Exception:
-            pass
-        mouse_listener = None
-    capture_pressed_tokens.clear()
-    clear_outgoing_queue()
-    close_peer_socket()
-
-
-def start_listeners() -> None:
-    global keyboard_listener, mouse_listener
-    stop_listeners()
-    keyboard_listener = pk.Listener(on_press=on_press, on_release=on_release, suppress=SUPPRESS_LOCAL_WHEN_FORWARDING)
-    keyboard_listener.start()
-    if CAPTURE_MOUSE:
-        mouse_listener = pm.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll, suppress=SUPPRESS_LOCAL_WHEN_FORWARDING)
-        mouse_listener.start()
-
-
-def sync_capture_mode() -> None:
-    with state_lock:
-        should_forward = INPUT_OWNER and state["target_role"] != ROLE
-    if should_forward:
-        if keyboard_listener is None:
-            try:
-                start_listeners()
-                set_state(capture=("Forwarding (suppressed)" if SUPPRESS_LOCAL_WHEN_FORWARDING else "Forwarding (not suppressed)"), forwarding=True)
-                log(f"Forwarding local input to {PEER_LABEL}")
-            except Exception as exc:
-                set_state(capture="Capture failed", forwarding=False, last_error=str(exc))
-                log(f"Failed to start capture: {exc}")
-        else:
-            set_state(forwarding=True)
-    else:
-        if keyboard_listener is not None or mouse_listener is not None:
-            stop_listeners()
-            log("Stopped forwarding; local machine owns input")
-        set_state(capture="Local only", forwarding=False)
-
-# ============================================================
-# Peer control server
-# ============================================================
-def public_status() -> dict:
-    with state_lock:
-        return {
-            "ok": True,
-            "role": ROLE,
-            "label": LOCAL_LABEL,
-            "target": state["target_role"],
-            "input_owner": INPUT_OWNER,
-            "forwarding": state["forwarding"],
-            "capture": state["capture"],
-        }
-
-
-class ControlHandler(BaseHTTPRequestHandler):
-    server_version = "KVMControl/1.0"
-
-    def _json(self, code: int, payload: dict) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *_args):
-        return
-
-    def do_GET(self):
-        if not check_auth(self.headers.get("Authorization")):
-            self._json(401, {"ok": False, "error": "unauthorized"})
-            return
-        if self.path == "/ping":
-            self._json(200, public_status())
-            return
-        self._json(404, {"ok": False, "error": "not_found"})
-
-    def do_POST(self):
-        if not check_auth(self.headers.get("Authorization")):
-            self._json(401, {"ok": False, "error": "unauthorized"})
-            return
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        raw = self.rfile.read(length) if length else b"{}"
-        try:
-            payload = json.loads(raw.decode("utf-8")) if raw else {}
-        except Exception:
-            self._json(400, {"ok": False, "error": "bad_json"})
-            return
-
-        if self.path == "/intent":
-            target = str(payload.get("target", "")).strip().lower()
-            if target not in {"mac", "windows"}:
-                self._json(400, {"ok": False, "error": "bad_target"})
-                return
-            switch_target(target, source="peer", notify_peer=False)
-            self._json(200, {"ok": True, "applied": target})
-            return
-
-        self._json(404, {"ok": False, "error": "not_found"})
-
-
-def start_control_server() -> ThreadingHTTPServer:
-    httpd = ThreadingHTTPServer((CONTROL_HOST, CONTROL_PORT), ControlHandler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    return httpd
-
-# ============================================================
-# Peer operations
-# ============================================================
-def ping_peer() -> bool:
-    try:
-        resp = urlopen_json(peer_control_url("/ping"), method="GET")
-        label = resp.get("label") or PEER_LABEL
-        target = resp.get("target", "unknown")
-        set_state(peer_online=True, peer_status=f"Online ({label})\nTarget: {target}", peer_seen=now_label())
-        return True
-    except Exception as exc:
-        set_state(peer_online=False, peer_status=f"Offline\n{exc}")
-        return False
-
-
-def send_peer_intent(target: str) -> bool:
-    try:
-        urlopen_json(peer_control_url("/intent"), method="POST", payload={"target": target})
-        return True
-    except Exception as exc:
-        set_state(last_error=f"Peer intent failed: {exc}")
-        log(f"Peer intent failed: {exc}")
-        return False
-
-
-def heartbeat_worker() -> None:
-    while not shutdown_event.is_set():
-        ping_peer()
-        shutdown_event.wait(HEARTBEAT_INTERVAL_SECONDS)
-
-# ============================================================
-# Core switching logic
-# ============================================================
-def switch_target(target: str, source: str = "local", notify_peer: bool = True) -> None:
-    if target not in {"mac", "windows"}:
-        return
-
-    set_state(target_role=target, last_action=f"Switch → {target} ({source})")
-    sync_capture_mode()
-
-    if source != "peer" and notify_peer:
-        ok = send_peer_intent(target)
-        if ok:
-            log(f"Asked peer to switch to {target}")
-
-
-def return_local() -> None:
-    switch_target(ROLE, source="local", notify_peer=True)
-
-# ============================================================
-# HyperCore rendering
-# ============================================================
-def render_ui(force: bool = False) -> None:
-    global ui_dirty
-    with state_lock:
-        dirty = ui_dirty
-        ui_dirty = False
-        snapshot = dict(state)
-        activity = "\n".join(log_lines) if log_lines else f"[{now_label()}] Ready"
-
-    if not (force or dirty):
-        return
-
-    target_label = "Mac" if snapshot["target_role"] == "mac" else "Windows"
-    forwarding_text = "Active" if snapshot["forwarding"] else "Local"
-    help_text = (
-        f"Physical keyboard/mouse attached here: {'Yes' if INPUT_OWNER else 'No'}\n"
-        f"When target is this machine, input stays local. When target is {PEER_LABEL} and this machine is the input owner, keyboard/mouse events are forwarded to the peer.\n"
-        f"Emergency return-to-local hotkey while forwarding: {EMERGENCY_RETURN_KEY.upper()}\n"
-        f"Local control server: http://{CONTROL_HOST}:{CONTROL_PORT}\n"
-        f"Local input server: tcp://{CONTROL_HOST}:{INPUT_PORT}\n"
-        f"Peer: {PEER_LABEL} @ http://{PEER_HOST}:{PEER_CONTROL_PORT} and tcp://{PEER_HOST}:{PEER_INPUT_PORT}"
-    )
-    error_text = f"Capture: {snapshot['capture']}\nLast error: {snapshot['last_error']}"
-
-    hc.write(
-        "root/app",
-        title=f"{LOCAL_LABEL} KVM",
-        subtitle="One keyboard, two peers. Switch target; do not rely on Bluetooth host stealing.",
-        local_label=LOCAL_LABEL,
-        input_owner=("Yes" if INPUT_OWNER else "No"),
-        active_target=target_label,
-        forwarding=forwarding_text,
-        peer_status=snapshot["peer_status"],
-        transport=snapshot["transport"],
-        help_text=help_text,
-        error_text=error_text,
-        activity=activity,
-    )
-
-# ============================================================
-# HyperCore action loop
-# ============================================================
-def parse_action(v) -> dict:
-    raw = v.get("data", {}) if isinstance(v, dict) else {}
-    return json.loads(raw) if isinstance(raw, str) else raw
-
-
-def action_loop() -> None:
-    while not shutdown_event.is_set():
-        try:
-            snap = hc.snapshot() or {}
-        except Exception:
-            snap = {}
-
-        for k, v in list(snap.items()):
-            if not k.startswith("inbox/"):
-                continue
-            if k in processed_actions_set:
-                try:
-                    hc.remove(k)
-                except Exception:
-                    pass
-                continue
-
-            processed_actions.append(k)
-            processed_actions_set.add(k)
-            while len(processed_actions) > processed_actions.maxlen:
-                old = processed_actions.popleft()
-                processed_actions_set.discard(old)
-
-            try:
-                msg = parse_action(v)
-                action = msg.get("type")
-                if action == "switch_target":
-                    target = str(msg.get("target", "")).strip().lower()
-                    log(f"UI: switch to {target}")
-                    switch_target(target, source="ui", notify_peer=True)
-                elif action == "return_local":
-                    log("UI: return local")
-                    return_local()
-                elif action == "probe_peer":
-                    ok = ping_peer()
-                    log("Peer ping ok" if ok else "Peer ping failed")
-            except Exception as exc:
-                set_state(last_error=f"Action error: {exc}")
-                log(f"Action error: {exc}")
-            finally:
-                try:
-                    hc.remove(k)
-                except Exception:
-                    pass
-
-        render_ui()
-        time.sleep(LOOP_SLEEP_SECONDS)
 
 # ============================================================
 # Main
 # ============================================================
-def main() -> None:
-    hc.start_relay()
-    hc.clear()
-    hc.mount("root/app", html=APP_HTML, js=APP_JS, fixed=True, layer=10)
 
-    log(f"Starting {LOCAL_LABEL} KVM | input_owner={INPUT_OWNER}")
-    log(f"Control server on http://{CONTROL_HOST}:{CONTROL_PORT}")
-    log(f"Input server on tcp://{CONTROL_HOST}:{INPUT_PORT}")
-    log(f"Peer configured as {PEER_LABEL} @ {PEER_HOST}")
-    if IS_MAC:
-        log("macOS: grant Accessibility permission to your terminal/Python before forwarding input.")
+parser = argparse.ArgumentParser(description="HyperFlow KVM")
+parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
+parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
+parser.add_argument("--peers", nargs="*", default=[])
+parser.add_argument("--port", type=int, default=8765)
+parser.add_argument("--root", default="kvm")
+args = parser.parse_args()
 
-    control_server = start_control_server()
-    input_server = start_input_server()
-    sender_thread = threading.Thread(target=sender_worker, daemon=True)
-    sender_thread.start()
-    heartbeat_thread = threading.Thread(target=heartbeat_worker, daemon=True)
-    heartbeat_thread.start()
+hc = HyperClient(
+    root=args.root, discovery=args.discovery, relay=args.relay,
+    peers=[f"http://{p}:{args.port}" for p in args.peers], port=args.port)
+hc.connect()
+hc.clear()
 
-    set_state(capture="Local only", transport="Disconnected")
-    render_ui(force=True)
+ME      = hc.machine_id
+MY_NAME = hc.machine_name
+bt      = make_bt()
 
+# ── helpers ──
+
+def publish_devices(devs):
+    """Write this machine's info + device list to the graph."""
+    hc.write(f"_m/{ME}/info", data=pack({
+        "id": ME, "name": MY_NAME, "os": MY_OS,
+        "bt": bt.label(), "devices": devs, "t": time.time(),
+    }))
+
+def publish_heartbeat():
+    hc.write(f"_m/{ME}/hb", data=pack({"t": time.time()}))
+
+def read_machines(snap):
+    """Return {machine_id: info_dict} from snapshot."""
+    machines = {}
+    for k, v in snap.items():
+        if k.startswith("_m/") and k.endswith("/info"):
+            mid = k.split("/")[1]
+            machines[mid] = unpack(v)
+    return machines
+
+def read_alive(snap, now):
+    """Return set of machine IDs with recent heartbeats."""
+    alive = set()
+    for k, v in snap.items():
+        if k.startswith("_m/") and k.endswith("/hb"):
+            mid = k.split("/")[1]
+            hb = unpack(v)
+            try:
+                if now - float(hb.get("t", 0)) < 10:
+                    alive.add(mid)
+            except: pass
+    return alive
+
+
+# ── initial setup ──
+
+hc.mount("root/dash", html=DASH_HTML, js=DASH_JS, fixed=True, layer=10)
+hc.write("root/dash", status="scanning bluetooth...", me=f"{MY_NAME} · {MY_OS}", log="starting...", ts="")
+
+print(f"\nscanning bluetooth...")
+devices = bt.scan()
+publish_devices(devices)
+publish_heartbeat()
+time.sleep(0.5)  # let the relay process
+
+print(f"found {len(devices)} device(s):")
+for d in devices:
+    c = "●" if d.get("connected") else "○"
+    print(f"  {c} {d['name']}  {d['address']}")
+print()
+
+
+# ── main loop ──
+
+seen    = set()
+last_hb = time.time()
+last_ui = 0
+last_sc = time.time()
+logmsg  = "ready"
+
+while True:
     try:
-        action_loop()
+        now  = time.time()
+        snap = hc.snapshot() or {}
+
+        # heartbeat
+        if now - last_hb > 3:
+            publish_heartbeat()
+            last_hb = now
+
+        # auto-rescan every 20s
+        if now - last_sc > 20:
+            devices = bt.scan()
+            publish_devices(devices)
+            last_sc = now
+
+        # ── inbox ──
+        for k, v in list(snap.items()):
+            if not k.startswith("inbox/") or k in seen:
+                continue
+            seen.add(k)
+
+            try:
+                msg = unpack(v)
+                act = msg.get("type", "")
+                addr = msg.get("address", "")
+                mid  = msg.get("machine", "")
+
+                if act == "rescan":
+                    print("rescan requested")
+                    devices = bt.scan()
+                    publish_devices(devices)
+                    last_sc = now
+                    logmsg = f"rescanned — {len(devices)} devices"
+
+                elif act == "connect" and mid == ME:
+                    print(f"connect {addr}")
+                    ok, txt = bt.connect(addr)
+                    logmsg = txt; print(f"  → {txt}")
+                    devices = bt.scan(); publish_devices(devices)
+
+                elif act == "disconnect" and mid == ME:
+                    print(f"disconnect {addr}")
+                    ok, txt = bt.disconnect(addr)
+                    logmsg = txt; print(f"  → {txt}")
+                    devices = bt.scan(); publish_devices(devices)
+
+                elif act == "steal":
+                    # steal = tell other machine to disconnect, then connect here
+                    print(f"steal {addr} from {mid[:16]}")
+                    logmsg = f"stealing {addr}..."
+
+                    # ask other machine to disconnect
+                    hc.write(f"_cmd/{mid}", data=pack({
+                        "action": "disconnect", "address": addr, "t": now}))
+
+                    # wait for BT to release
+                    time.sleep(2.5)
+
+                    # connect locally
+                    ok, txt = bt.connect(addr)
+                    logmsg = f"steal → {txt}"
+                    print(f"  → {txt}")
+                    devices = bt.scan(); publish_devices(devices)
+
+            except Exception as e:
+                logmsg = f"error: {e}"
+                print(f"  inbox error: {e}")
+                traceback.print_exc()
+
+            hc.remove(k)
+
+        # ── commands directed at us ──
+        cmd_val = snap.get(f"_cmd/{ME}")
+        if cmd_val:
+            cmd = unpack(cmd_val)
+            if cmd.get("action") == "disconnect" and now - float(cmd.get("t", 0)) < 15:
+                addr = cmd.get("address", "")
+                print(f"remote cmd: disconnect {addr}")
+                ok, txt = bt.disconnect(addr)
+                print(f"  → {txt}")
+                devices = bt.scan(); publish_devices(devices)
+            hc.remove(f"_cmd/{ME}")
+
+        # ── UI refresh ──
+        if now - last_ui > 1.5:
+            last_ui = now
+
+            machines = read_machines(snap)
+            alive    = read_alive(snap, now)
+
+            hc.write("root/dash",
+                status=f"{len(alive)} machine(s) · {len(devices)} local device(s)",
+                log=logmsg,
+                ts=time.strftime("%H:%M:%S"))
+
+            for mid, info in machines.items():
+                is_me = (mid == ME)
+                mn  = str(info.get("name", mid[:16]))[:24]
+                mo  = str(info.get("os", "?"))
+                mbt = str(info.get("bt", "?"))
+                mdevs = info.get("devices", [])
+                if isinstance(mdevs, str):
+                    try: mdevs = json.loads(mdevs)
+                    except: mdevs = []
+
+                mp = f"root/dash/m_{mid[:12]}"
+                icon = "💻" if "arwin" in mo else "🖥️"
+                is_up = mid in alive
+
+                if is_me:       badge = "⬤ THIS MACHINE"
+                elif is_up:     badge = "● ONLINE"
+                else:           badge = "○ OFFLINE"
+
+                hc.mount(mp, html=MACHINE_HTML, layer=5)
+                hc.write(mp, icon=icon, mname=mn,
+                    msub=f"{mo} · {mbt} · {len(mdevs)} device(s)",
+                    badge=badge)
+
+                # device rows
+                for i, dev in enumerate(mdevs):
+                    dp = f"{mp}/d{i}"
+                    hc.mount(dp, html=device_row(dev, mid, is_me), layer=5)
+
+        time.sleep(0.1)
+
     except KeyboardInterrupt:
-        pass
-    finally:
-        shutdown_event.set()
-        stop_listeners()
-        close_peer_socket()
-        try:
-            control_server.shutdown()
-            control_server.server_close()
-        except Exception:
-            pass
-        try:
-            input_server.shutdown()
-            input_server.server_close()
-        except Exception:
-            pass
-
-
-if __name__ == "__main__":
-    main()
+        print("\nshutting down...")
+        hc.stop()
+        break
+    except Exception as e:
+        print(f"loop error: {e}")
+        traceback.print_exc()
+        time.sleep(2)
