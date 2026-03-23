@@ -65,7 +65,10 @@ hc = HyperClient(
     peers=[f"http://{p}:{args.port}" for p in args.peers], port=args.port,
 )
 hc.connect()
-hc.clear()
+
+# Don't hc.clear() — that would wipe the other machine's registration.
+# Only clean up our own UI mount point.
+hc.remove("root/dash")
 
 ME = hc.machine_id
 MY_NAME = hc.machine_name
@@ -380,6 +383,11 @@ while True:
             if k.startswith("_machines/") and k.endswith("/info"):
                 mid = k.split("/")[1]
                 machines[mid] = v
+
+        if machines:
+            print(f"[ui] {len(machines)} machine(s): {list(machines.keys())}")
+        else:
+            print(f"[ui] no machines in snapshot ({len(snap)} keys total)")
 
         # check which machines are alive (heartbeat within 10s)
         alive = set()
