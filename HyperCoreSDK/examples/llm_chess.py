@@ -4,16 +4,16 @@ import re
 import time
 import requests
 import chess
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
 # -----------------------------
 # Config
 # -----------------------------
-RELAY = "http://localhost:8765"   # change to 8766 if needed
+RELAY = "http://localhost:8766"   # change to 8766 if needed
 ROOT = "demo_llm_chess_streaming_compat"
 
-MODEL_WHITE = "qwen2.5:3b"
-MODEL_BLACK = "gemma3:4b"
+MODEL_WHITE = "qwen3:14b"
+MODEL_BLACK = "gemma3:12b"
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 
 TURN_DELAY = 1.2

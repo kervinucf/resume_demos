@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 import time
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
 hc = HyperClient(relay="http://localhost:8766", root="demo_tictactoe")
 hc.start_relay()

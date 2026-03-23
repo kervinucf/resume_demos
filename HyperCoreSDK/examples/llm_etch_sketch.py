@@ -13,7 +13,7 @@ from html import escape
 import requests
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, ImageStat
 
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
 # ---------------------------------
 # Config
@@ -21,8 +21,8 @@ from client import HyperClient
 RELAY = "http://localhost:8765"
 ROOT = "demo_llm_etch_battle"
 
-MODEL_A = "qwen2.5:3b"
-MODEL_B = "gemma3:4b"
+MODEL_A = "qwen3:14b"
+MODEL_B = "gemma3:12b"
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 REQUEST_TIMEOUT = 120
 TURN_DELAY = 0.15

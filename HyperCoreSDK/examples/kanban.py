@@ -2,7 +2,7 @@
 import time
 import json
 import uuid
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
 hc = HyperClient(relay="http://localhost:8765", root="demo_kanban")
 hc.start_relay()

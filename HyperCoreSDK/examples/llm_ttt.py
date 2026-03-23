@@ -3,7 +3,7 @@ import json
 import re
 import time
 import requests
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
 # -----------------------------
 # Config
@@ -11,7 +11,7 @@ from client import HyperClient
 RELAY = "http://localhost:8765"   # change to 8766 if that is your relay
 ROOT = "demo_llm_tictactoe_loop"
 
-MODEL_X = "qwen2.5:3b"
+MODEL_X = "qwen3:14b"
 MODEL_O = "gemma3:4b"
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 

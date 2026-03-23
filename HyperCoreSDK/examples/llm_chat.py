@@ -2,10 +2,10 @@
 import json
 import time
 import requests
-from client import HyperClient
+from HyperCoreSDK.client import HyperClient
 
-MODEL_A = "qwen2.5:3b"
-MODEL_B = "gemma3:4b"
+MODEL_A = "qwen3:14b"
+MODEL_B = "gemma3:12b"
 TURN_DELAY = 1.0
 OLLAMA_CHAT_URL = "http://localhost:11434/api/chat"
 

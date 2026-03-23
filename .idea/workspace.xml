@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/LICENSE" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/LICENSE" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/etch_sketch.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/etch_sketch.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/exports/etch_20260311_154125.png" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/exports/etch_20260311_154125.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/exports/etch_20260311_155526.png" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/exports/etch_20260311_155526.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/helpers/context.txt" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/helpers/context.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/kanban.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/kanban.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/llm_chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/llm_chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/llm_chess.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/llm_chess.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/llm_etch_sketch.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/llm_etch_sketch.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/llm_ttt.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/llm_ttt.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/market_game.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/market_game.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/python_controller.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/python_controller.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/examples/tic_tac_toe.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/examples/tic_tac_toe.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/dir/edit.html" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/dir/edit.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/dir/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/dir/index.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/relay.js" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 3
+}</component>
+  <component name="ProjectId" id="3AouQNOKVerAJ8rSeMRJexA4dRP" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.client.executor": "Run",
+    "Python.llm_chat.executor": "Run",
+    "Python.llm_chess.executor": "Run",
+    "Python.llm_etch_sketch.executor": "Run",
+    "Python.llm_ttt.executor": "Run",
+    "Python.main.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true"
+  }
+}]]></component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\Home\Desktop\code\resume_demos\HyperCoreSDK" />
+      <recent name="C:\Users\Home\Desktop\code\resume_demos" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.main">
+    <configuration name="client" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="C:\Users\Home\Desktop\code\resume_demos\HyperCoreSDK\client.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="llm_chat" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/examples" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/examples/llm_chat.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="llm_chess" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/examples" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/examples/llm_chess.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="llm_ttt" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/examples" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/examples/llm_ttt.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.main" />
+        <item itemvalue="Python.client" />
+        <item itemvalue="Python.llm_chat" />
+        <item itemvalue="Python.llm_ttt" />
+        <item itemvalue="Python.llm_chess" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-e0ed3721d81e-36ea0e71a18c-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.25410.159" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="" />
+      <created>1773271226396</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1773271226396</updated>
+    </task>
+    <servers />
+  </component>
+</project>
