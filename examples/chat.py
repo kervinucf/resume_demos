@@ -7,10 +7,11 @@ Chat — two machines, same WiFi, zero config.
     # Machine A
     python -m examples.chat --discovery lan
 
-    # Machine B
+    # Machine B (same command, finds A via mDNS, syncs via Gun)
     python -m examples.chat --discovery lan
 
-    Open the URL it prints. That's it.
+    Both print: open in browser: http://localhost:8765/chat
+    Open that on each machine. Messages sync automatically.
 """
 
 import argparse
@@ -36,9 +37,6 @@ hc = HyperClient(
 hc.connect()
 hc.clear()
 
-# ------------------------------------------------------------------
-# Templates
-# ------------------------------------------------------------------
 CHAT_HTML = """
 <div style="width:100%;height:100%;display:flex;flex-direction:column;background:#111827;color:#e5e7eb;font-family:Arial,sans-serif">
   <div style="padding:12px 14px;border-bottom:1px solid #374151;display:flex;justify-content:space-between;align-items:center">
@@ -80,9 +78,8 @@ CHAT_JS = r"""
 })();
 """
 
-role = "hosting" if hc.is_hosting else "joined"
 hc.mount("root/chat", html=CHAT_HTML, js=CHAT_JS, fixed=True, layer=10)
-hc.write("root/chat", title="general", mode=f"{hc.discovery} · {role} · {hc.machine_id[:16]}")
+hc.write("root/chat", title="general", mode=f"{hc.discovery} · {hc.machine_id[:16]}")
 
 seen = set()
 while True:

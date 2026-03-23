@@ -4,27 +4,30 @@ HyperClient — two flags, zero config.
     discovery   =  who you talk to     (local | lan | trusted)
     relay       =  your role           (auto | host | join)
 
-    auto   →  browse mDNS for a relay. found one? join. nobody? become one.
-    host   →  always start the relay. advertise on mDNS.
-    join   →  browse mDNS for a relay. found one? join. nobody? fail.
+Architecture:
+    Every machine runs its own relay. Relays peer with each other via Gun.
+    The browser always opens http://localhost:8765/{root} — never a LAN IP.
+    Gun syncs data between relays in the background.
+    No cross-machine HTTP from the browser. No HTTPS redirect problems.
 
-    When discovery=lan, machines find each other via mDNS (_hyper._tcp.local).
-    No IPs. No peer lists. No configuration. Two machines, same WiFi, done.
+    discovery=local    →  standalone, no peering
+    discovery=lan      →  mDNS finds other relays, Gun peers with them
+    discovery=trusted  →  explicit peer list, Gun peers with them
+
+    relay=auto   →  always start a relay. if LAN, also discover and peer.
+    relay=host   →  same as auto (every machine hosts).
+    relay=join   →  find a peer first, fail if nobody's there, then start locally.
 
     pip install zeroconf
 
 Examples:
-    hc = HyperClient(root="chat")                                     # local, auto
-    hc = HyperClient(root="chat", discovery="lan")                    # LAN, mDNS
-    hc = HyperClient(root="chat", discovery="lan", relay="host")      # LAN, force host
-    hc = HyperClient(root="chat", discovery="lan", relay="join")      # LAN, join only
-    hc = HyperClient(root="chat", discovery="trusted",                # explicit peers
-                      peers=["http://10.0.0.5:8765"])
+    hc = HyperClient(root="chat")                                     # local
+    hc = HyperClient(root="chat", discovery="lan")                    # LAN
+    hc = HyperClient(root="chat", discovery="trusted",
+                      peers=["http://10.0.0.5:8765"])                 # explicit
 
     hc.connect()
-    hc.mount("root/chat", html="...", js="...", layer=10)
-    hc.write("root/chat", title="general")
-    hc.clear()
+    # prints:  open in browser: http://localhost:8765/chat
 """
 
 from __future__ import annotations
@@ -93,7 +96,8 @@ def _mdns_stop(handle: Any) -> None:
         pass
 
 
-def _mdns_browse(timeout: float = 3.0, own_machine_id: str = "") -> Optional[str]:
+def _mdns_browse(timeout: float = 3.0, own_machine_id: str = "") -> List[str]:
+    """Browse mDNS for hyper relays. Returns list of base URLs found."""
     from zeroconf import Zeroconf, ServiceBrowser
     found = []
 
@@ -123,7 +127,7 @@ def _mdns_browse(timeout: float = 3.0, own_machine_id: str = "") -> Optional[str
             break
         time.sleep(0.1)
     zc.close()
-    return found[0] if found else None
+    return found
 
 
 def _local_ip() -> str:
@@ -160,7 +164,6 @@ class HyperClient:
         self.discovery = discovery.lower()
         self.relay_mode = relay.lower()
         self._proc = None
-        self._hosting = False
         self._mdns_handle = None
         self._relay_script = relay_script or str(
             Path(__file__).resolve().parent / "src" / "relay.js"
@@ -169,12 +172,13 @@ class HyperClient:
         self.machine_id = os.getenv("HYPER_MACHINE_ID") or self._make_machine_id()
         self.machine_name = machine_name or socket.gethostname()
 
-        if relay_url:
-            self.relay_url = relay_url.rstrip("/")
-        else:
-            self.relay_url = f"http://127.0.0.1:{self.port}"
+        # always talk to our own local relay
+        self.relay_url = relay_url.rstrip("/") if relay_url else f"http://127.0.0.1:{self.port}"
 
+        # explicit peers (for trusted mode)
         self._explicit_peers = [self._gun_url(p) for p in (peers or [])]
+
+        # filled during connect()
         self.peers: List[str] = []
 
     # ------------------------------------------------------------------
@@ -182,26 +186,34 @@ class HyperClient:
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        if self.relay_mode == "host":
-            self._start_relay()
-            return
+        """
+        1. Discover peers (mDNS for LAN, explicit for trusted, none for local)
+        2. Start our own relay, configured to peer with whatever we found
+        3. Advertise ourselves on mDNS so others can find us
+        4. Browser opens http://localhost:{port}/{root} — always local
+        """
+        # discover who else is out there
+        remote_peers = self._discover_peers()
 
-        found = self._find_relay()
+        # build the full peer list (our LAN IP + discovered peers + explicit)
+        self.peers = self._build_peers(remote_peers)
 
-        if self.relay_mode == "join":
-            if not found:
-                raise RuntimeError(
-                    "No relay found and relay='join'. "
-                    "Use relay='auto' or relay='host'."
-                )
-            self._join(found)
-            return
+        # if relay=join, at least one remote peer must exist
+        if self.relay_mode == "join" and not remote_peers:
+            raise RuntimeError(
+                "No peers found and relay='join'. "
+                "Use relay='auto' or start another machine first."
+            )
 
-        if found:
-            self._join(found)
-        else:
-            log.info("no relay found — promoting to host")
-            self._start_relay()
+        # start our own relay
+        self._start_relay()
+
+        # advertise on mDNS
+        if self.discovery == "lan" and _mdns_available():
+            self._mdns_handle = _mdns_advertise(self.machine_id, self.port, self.root)
+
+        self._register()
+        self._print_banner(remote_peers)
 
     # backward compat
     def start_relay(self) -> None:
@@ -220,46 +232,70 @@ class HyperClient:
         return f"{self.relay_url}/gun"
 
     @property
-    def is_hosting(self) -> bool:
-        return self._hosting
-
-    @property
     def browser_url(self) -> str:
-        """URL you can open in a browser — uses LAN IP, not 127.0.0.1."""
+        return f"http://localhost:{self.port}/{self.root}"
+
+    # ------------------------------------------------------------------
+    # Discovery
+    # ------------------------------------------------------------------
+
+    def _discover_peers(self) -> List[str]:
+        """Find remote relays. Returns list of base URLs."""
         if self.discovery == "local":
-            return f"http://127.0.0.1:{self.port}/{self.root}"
-        return f"http://{_local_ip()}:{self.port}/{self.root}"
+            return []
 
-    # ------------------------------------------------------------------
-    # Find / Join / Host
-    # ------------------------------------------------------------------
+        if self.discovery == "trusted":
+            # just return explicit peers, no scanning
+            return [p.rstrip("/").replace("/gun", "") for p in self._explicit_peers]
 
-    def _find_relay(self) -> Optional[str]:
-        if self.discovery == "lan" and _mdns_available():
-            log.info("mDNS: browsing for relays...")
+        # LAN — use mDNS
+        if _mdns_available():
+            log.info("mDNS: scanning for peers...")
             found = _mdns_browse(timeout=3.0, own_machine_id=self.machine_id)
             if found:
-                log.info("mDNS: found relay at %s", found)
-                return found
-            log.info("mDNS: no relays found")
+                log.info("mDNS: found %d peer(s): %s", len(found), found)
+            else:
+                log.info("mDNS: no peers found (we'll be the first)")
+            return found
+        else:
+            log.warning("zeroconf not installed — pip install zeroconf")
+            return []
 
-        for base in self._probe_candidates():
-            if self._probe(base):
-                return base
-        return None
+    def _build_peers(self, remote_peers: List[str]) -> List[str]:
+        """Build Gun peer URLs: our LAN IP + discovered remotes + explicit."""
+        peers = []
 
-    def _join(self, relay_base: str) -> None:
-        self.relay_url = relay_base
-        self.peers = self._build_peers(relay_base)
-        self._register()
-        self._print_banner("joined")
+        # our own relay (localhost)
+        peers.append(f"http://127.0.0.1:{self.port}/gun")
+
+        # our LAN IP (so other relays and browsers on LAN can reach us)
+        if self.discovery in ("lan", "trusted"):
+            lan = f"http://{_local_ip()}:{self.port}/gun"
+            if lan not in peers:
+                peers.append(lan)
+
+        # discovered remote relays
+        for base in remote_peers:
+            gun_url = self._gun_url(base)
+            if gun_url not in peers:
+                peers.append(gun_url)
+
+        # explicit peers
+        for p in self._explicit_peers:
+            if p not in peers:
+                peers.append(p)
+
+        return peers
+
+    # ------------------------------------------------------------------
+    # Relay
+    # ------------------------------------------------------------------
 
     def _start_relay(self) -> None:
         if self._proc and self._proc.poll() is None:
             return
 
         bind = "127.0.0.1" if self.discovery == "local" else "0.0.0.0"
-        self.peers = self._build_peers(f"http://127.0.0.1:{self.port}")
 
         env = os.environ.copy()
         env["PORT"] = str(self.port)
@@ -276,24 +312,19 @@ class HyperClient:
         atexit.register(self.stop)
         self._wait_healthy()
 
-        self._hosting = True
-        self.relay_url = f"http://127.0.0.1:{self.port}"
-
-        if self.discovery == "lan" and _mdns_available():
-            self._mdns_handle = _mdns_advertise(self.machine_id, self.port, self.root)
-
-        self._register()
-        self._print_banner("hosting")
-
-    def _print_banner(self, role: str) -> None:
+    def _print_banner(self, remote_peers: List[str]) -> None:
+        role = "peered" if remote_peers else "standalone"
+        log.info("")
         log.info("━" * 50)
-        log.info("  %s · %s · %s", role, self.discovery, self.machine_id)
-        log.info("  ")
+        log.info("  %s · %s · %s", self.discovery, role, self.machine_id[:20])
+        log.info("")
         log.info("  open in browser:")
-        log.info("  %s", self.browser_url)
-        log.info("  ")
-        log.info("  peers: %s", self.peers)
+        log.info("  \033[1m%s\033[0m", self.browser_url)
+        log.info("")
+        if remote_peers:
+            log.info("  peered with: %s", [p.replace("http://", "") for p in remote_peers])
         log.info("━" * 50)
+        log.info("")
 
     def stop(self) -> None:
         _mdns_stop(self._mdns_handle)
@@ -301,47 +332,9 @@ class HyperClient:
         if self._proc and self._proc.poll() is None:
             self._proc.terminate()
         self._proc = None
-        self._hosting = False
 
     def stop_relay(self) -> None:
         self.stop()
-
-    # ------------------------------------------------------------------
-    # Peer list
-    # ------------------------------------------------------------------
-
-    def _build_peers(self, relay_base: str) -> List[str]:
-        peers = [self._gun_url(relay_base)]
-
-        if self.discovery in ("lan", "trusted"):
-            local_ip = _local_ip()
-            lan_peer = f"http://{local_ip}:{self.port}/gun"
-            if lan_peer not in peers:
-                peers.append(lan_peer)
-
-        for p in self._explicit_peers:
-            if p not in peers:
-                peers.append(p)
-
-        seen, out = set(), []
-        for p in peers:
-            if p not in seen:
-                seen.add(p)
-                out.append(p)
-        return out
-
-    def _probe_candidates(self) -> List[str]:
-        candidates = []
-        for p in self._explicit_peers:
-            base = p.rstrip("/")
-            if base.endswith("/gun"):
-                base = base[:-4]
-            if base not in candidates:
-                candidates.append(base)
-        local = f"http://127.0.0.1:{self.port}"
-        if local not in candidates:
-            candidates.append(local)
-        return candidates
 
     # ------------------------------------------------------------------
     # Display API
@@ -383,10 +376,8 @@ class HyperClient:
     def _register(self) -> None:
         self.write(f"_machines/{self.machine_id}/info",
                    machine_id=self.machine_id, name=self.machine_name,
-                   discovery=self.discovery, relay_mode=self.relay_mode,
-                   hosting=self._hosting, peers=json.dumps(self.peers),
+                   discovery=self.discovery, peers=json.dumps(self.peers),
                    started_at=time.time())
-        self.heartbeat()
 
     def heartbeat(self) -> None:
         self.write(f"_machines/{self.machine_id}/presence",
@@ -409,14 +400,10 @@ class HyperClient:
 (function(){{
   'use strict';
   if(typeof Gun==='undefined'){{console.error('[hyper] Gun not loaded');return;}}
-  var PEERS={json.dumps(self.peers)};
-  var ROOT={json.dumps(self.root)};
-  var MACHINE={json.dumps(self.machine_id)};
-  window.$gun=Gun({{peers:PEERS}});
-  window.$root=window.$gun.get(ROOT);
+  window.$gun=Gun({{peers:{json.dumps(self.peers)}}});
+  window.$root=window.$gun.get({json.dumps(self.root)});
   window.$scene=window.$root.get('scene');
-  window.$hyper={{relay:{json.dumps(self.gun_relay)},root:ROOT,machine:MACHINE,
-    scene:window.$scene,gun:window.$gun}};
+  window.$hyper={{machine:{json.dumps(self.machine_id)},root:{json.dumps(self.root)}}};
 }})();
 """.strip()
 
@@ -438,16 +425,13 @@ class HyperClient:
         out, row_mode, i = [], False, 0
         while i < len(layout):
             ch = layout[i]
-            if ch.isspace():
-                i += 1; continue
+            if ch.isspace(): i += 1; continue
             if ch == "[":
                 end = layout.index("]", i)
                 name = layout[i+1:end].strip()
                 key = f"{base}~{name}" if row_mode else f"{base}/{name}"
-                out.append((name.upper(), key))
-                i = end + 1; continue
-            if ch == "~":
-                row_mode = True; i += 1; continue
+                out.append((name.upper(), key)); i = end + 1; continue
+            if ch == "~": row_mode = True; i += 1; continue
             i += 1
         return out
 
@@ -471,20 +455,17 @@ class HyperClient:
             h["Authorization"] = f"Bearer {self.token}"
         return h
 
-    def _get(self, path: str):
-        return self._req(path, "GET")
+    def _get(self, p): return self._req(p, "GET")
+    def _post(self, p, data=None): return self._req(p, "POST", data)
 
-    def _post(self, path: str, data=None):
-        return self._req(path, "POST", data)
-
-    def _put(self, path: str, data: dict) -> bool:
-        r = self._req(path, "PUT", data, write=True)
+    def _put(self, p, data):
+        r = self._req(p, "PUT", data, write=True)
         return r is not None and (r.get("ok", False) if isinstance(r, dict) else True)
 
-    def _delete(self, path: str) -> bool:
-        return self._req(path, "DELETE", write=True) is not None
+    def _delete(self, p):
+        return self._req(p, "DELETE", write=True) is not None
 
-    def _req(self, path: str, method: str = "GET", data=None, write=False):
+    def _req(self, path, method="GET", data=None, write=False):
         url = f"{self.base}/{path}"
         body = json.dumps(data).encode() if data is not None else None
         req = urllib.request.Request(url, data=body, method=method,
@@ -497,24 +478,22 @@ class HyperClient:
             log.error("%s %s → %s", method, path, e)
             return None
 
-    def _probe(self, base_url: str, timeout: float = 2.0) -> bool:
+    def _probe(self, base_url, timeout=2.0):
         try:
             req = urllib.request.Request(base_url, method="GET")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read())
-                return bool(data.get("relay"))
+                return bool(json.loads(resp.read()).get("relay"))
         except Exception:
             pass
         try:
-            parsed = urllib.parse.urlparse(base_url)
-            s = socket.create_connection(
-                (parsed.hostname or "127.0.0.1", parsed.port or self.port), timeout=timeout)
+            p = urllib.parse.urlparse(base_url)
+            s = socket.create_connection((p.hostname or "127.0.0.1", p.port or self.port), timeout=timeout)
             s.close()
             return True
         except OSError:
             return False
 
-    def _wait_healthy(self, timeout: float = 10.0) -> None:
+    def _wait_healthy(self, timeout=10.0):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._probe(f"http://127.0.0.1:{self.port}", timeout=1):
@@ -522,41 +501,33 @@ class HyperClient:
             time.sleep(0.3)
         raise RuntimeError(f"Relay not ready after {timeout}s")
 
-    def _find_node(self) -> str:
+    def _find_node(self):
         from shutil import which
         node = which("node")
-        if node:
-            return node
+        if node: return node
         for p in ("/opt/homebrew/bin/node", "/usr/local/bin/node",
                    "C:/Program Files/nodejs/node.exe"):
-            if Path(p).exists():
-                return p
+            if Path(p).exists(): return p
         raise RuntimeError("node not found in PATH")
 
     @staticmethod
-    def _make_machine_id() -> str:
+    def _make_machine_id():
         return f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
 
     @staticmethod
-    def _gun_url(url: str) -> str:
+    def _gun_url(url):
         url = url.rstrip("/")
         return url if url.endswith("/gun") else url + "/gun"
 
-    @staticmethod
-    def _is_private(addr: str) -> bool:
-        return (addr.startswith("10.") or addr.startswith("192.168.")
-                or addr.startswith("172.") or addr.startswith("169.254."))
-
     def __repr__(self):
-        role = "hosting" if self._hosting else "joined"
-        return f"<HyperClient {self.relay_url}/{self.root} [{self.discovery}/{role}]>"
+        return f"<HyperClient {self.relay_url}/{self.root} [{self.discovery}]>"
 
 
 class _NodeBuilder:
-    def __init__(self, client: HyperClient, path: str):
+    def __init__(self, client, path):
         self._c = client
         self._p = path
-        self._d: Dict[str, Any] = {}
+        self._d = {}
 
     def write(self, **fields):
         self._d.update(fields)
