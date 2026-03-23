@@ -326,9 +326,11 @@ hc.write("root/dash", status="scanning...", me=f"{MY_NAME} ({MY_OS})", hint="")
 
 # Register this machine
 devices = list_devices()
-hc.write(f"_machines/{ME}/info",
-    machine_id=ME, name=MY_NAME, os=MY_OS,
-    devices=json.dumps(devices), t=time.time())
+machine_info = {
+    "machine_id": ME, "name": MY_NAME, "os": MY_OS,
+    "devices": devices, "t": time.time()
+}
+hc.write(f"_machines/{ME}/info", data=json.dumps(machine_info))
 
 # Start capture thread
 start_capture()
@@ -346,7 +348,8 @@ while True:
 
     # --- heartbeat ---
     if now - last_heartbeat > 2.0:
-        hc.write(f"_machines/{ME}/presence", status="online", t=now)
+        hc.write(f"_machines/{ME}/presence",
+                 data=json.dumps({"status": "online", "t": now}))
         last_heartbeat = now
 
     # --- process inbox ---
@@ -382,12 +385,11 @@ while True:
         for k, v in snap.items():
             if k.startswith("_machines/") and k.endswith("/info"):
                 mid = k.split("/")[1]
-                machines[mid] = v
-
-        if machines:
-            print(f"[ui] {len(machines)} machine(s): {list(machines.keys())}")
-        else:
-            print(f"[ui] no machines in snapshot ({len(snap)} keys total)")
+                try:
+                    info = json.loads(v.get("data", "{}")) if isinstance(v.get("data"), str) else v
+                    machines[mid] = info
+                except:
+                    machines[mid] = v
 
         # check which machines are alive (heartbeat within 10s)
         alive = set()
@@ -395,11 +397,14 @@ while True:
             if k.startswith("_machines/") and k.endswith("/presence"):
                 mid = k.split("/")[1]
                 try:
-                    t = float(v.get("t", 0))
+                    pres = json.loads(v.get("data", "{}")) if isinstance(v.get("data"), str) else v
+                    t = float(pres.get("t", 0))
                     if now - t < 10:
                         alive.add(mid)
                 except:
                     pass
+
+        print(f"[ui] {len(machines)} machine(s), {len(alive)} alive, {len(snap)} snapshot keys")
 
         # update status
         n_alive = len(alive)
@@ -418,7 +423,9 @@ while True:
 
             # device list HTML
             try:
-                devs = json.loads(info.get("devices", "[]")) if isinstance(info.get("devices"), str) else []
+                devs = info.get("devices", [])
+                if isinstance(devs, str):
+                    devs = json.loads(devs)
             except:
                 devs = []
             dev_html = ""
