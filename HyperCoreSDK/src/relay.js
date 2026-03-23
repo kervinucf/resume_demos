@@ -1,16 +1,13 @@
 /**
  * Scene Relay — every machine runs one, they peer with each other.
  *
- * The browser always opens localhost. Gun syncs data across relays.
- * No cross-machine HTTP from the browser. No HTTPS problems.
+ * Browser always opens localhost. Gun syncs data across relays.
+ * Shell HTML is generated with CDN-loaded Gun (no /gun/gun.js middleware dependency).
  *
  * Env vars:
  *   PORT               (default 8765)
  *   HYPER_BIND_HOST    (default 0.0.0.0)
- *   HYPER_PEERS        (JSON array of Gun peer URLs for cross-machine sync)
- *   HYPER_MACHINE_ID
- *   HYPER_MACHINE_NAME
- *   HYPER_DISCOVERY
+ *   HYPER_PEERS        (JSON array of Gun peer URLs)
  */
 
 const Gun = require('gun');
@@ -21,11 +18,7 @@ const PORT = parseInt(process.env.PORT || '8765', 10);
 const BIND = process.env.HYPER_BIND_HOST || '0.0.0.0';
 
 let PEERS;
-try {
-  PEERS = JSON.parse(process.env.HYPER_PEERS || '[]');
-} catch (_) {
-  PEERS = [];
-}
+try { PEERS = JSON.parse(process.env.HYPER_PEERS || '[]'); } catch (_) { PEERS = []; }
 
 const buckets = {};
 const tokens = {};
@@ -34,42 +27,29 @@ const CONTENT_FIELDS = [
   'html', 'css', 'js', 'link', 'json', 'data', 'meta', 'links', 'actions',
   'layer', 'fixed', 'portal'
 ];
+const ALL_FIELDS = [...CONTENT_FIELDS, 'lat', 'lng', 'altitude', 'duration', 'remove'];
 
-const ALL_FIELDS = [
-  ...CONTENT_FIELDS,
-  'lat', 'lng', 'altitude', 'duration', 'remove'
-];
-
-function getBucket(name) {
-  if (!buckets[name]) buckets[name] = { snapshot: {}, subscribed: false };
-  return buckets[name];
+function getBucket(n) {
+  if (!buckets[n]) buckets[n] = { snapshot: {}, subscribed: false };
+  return buckets[n];
 }
 
-function hasContent(data) {
-  return CONTENT_FIELDS.some(f => data[f] !== undefined && data[f] !== null);
-}
+function hasContent(d) { return CONTENT_FIELDS.some(f => d[f] !== undefined && d[f] !== null); }
 
-function cleanNodeData(data) {
-  const clean = {};
-  for (const k of Object.keys(data || {})) {
-    if (k === '_' || k === '#' || k === '>') continue;
-    if (data[k] !== null) clean[k] = data[k];
-  }
-  delete clean.remove;
-  return clean;
+function cleanNodeData(d) {
+  const c = {};
+  for (const k of Object.keys(d || {})) { if (k === '_' || k === '#' || k === '>') continue; if (d[k] !== null) c[k] = d[k]; }
+  delete c.remove;
+  return c;
 }
 
 function subscribe(name) {
   const b = getBucket(name);
   if (b.subscribed) return;
   b.subscribed = true;
-
   gun.get(name).get('scene').map().on((data, key) => {
     if (!data || key === '_') return;
-    if (!hasContent(data)) {
-      delete b.snapshot[key];
-      return;
-    }
+    if (!hasContent(data)) { delete b.snapshot[key]; return; }
     const clean = cleanNodeData(data);
     if (Object.keys(clean).length > 0) b.snapshot[key] = clean;
     else delete b.snapshot[key];
@@ -78,11 +58,8 @@ function subscribe(name) {
 
 function updateSnapshot(b, key, data) {
   if (!hasContent(data)) return;
-  const existing = b.snapshot[key] || {};
-  const merged = { ...existing };
-  for (const [k, v] of Object.entries(data)) {
-    if (v !== null && v !== undefined) merged[k] = v;
-  }
+  const merged = { ...(b.snapshot[key] || {}) };
+  for (const [k, v] of Object.entries(data)) { if (v !== null && v !== undefined) merged[k] = v; }
   delete merged.remove;
   if (Object.keys(merged).length > 0) b.snapshot[key] = merged;
   else delete b.snapshot[key];
@@ -90,25 +67,20 @@ function updateSnapshot(b, key, data) {
 
 function deleteSnapshotPath(b, key) {
   delete b.snapshot[key];
-  const prefix = key + '/';
-  for (const k of Object.keys(b.snapshot)) {
-    if (k.startsWith(prefix)) delete b.snapshot[k];
-  }
+  const pfx = key + '/';
+  for (const k of Object.keys(b.snapshot)) { if (k.startsWith(pfx)) delete b.snapshot[k]; }
 }
 
-function nullOut(bucketName, key) {
-  const node = gun.get(bucketName).get('scene').get(key);
-  const tombstone = {};
-  for (const f of ALL_FIELDS) tombstone[f] = null;
-  node.put(tombstone);
+function nullOut(bkt, key) {
+  const tomb = {};
+  for (const f of ALL_FIELDS) tomb[f] = null;
+  gun.get(bkt).get('scene').get(key).put(tomb);
 }
 
-function nullOutDescendants(bucketName, snapshot, key) {
-  nullOut(bucketName, key);
-  const prefix = key + '/';
-  for (const k of Object.keys(snapshot)) {
-    if (k.startsWith(prefix)) nullOut(bucketName, k);
-  }
+function nullOutDesc(bkt, snap, key) {
+  nullOut(bkt, key);
+  const pfx = key + '/';
+  for (const k of Object.keys(snap)) { if (k.startsWith(pfx)) nullOut(bkt, k); }
 }
 
 function checkAuth(bkt, req) {
@@ -124,301 +96,163 @@ function sendJson(res, obj, status = 200) {
 }
 
 function readBody(req) {
-  return new Promise(resolve => {
-    let d = '';
-    req.on('data', c => d += c);
-    req.on('end', () => resolve(d));
-  });
+  return new Promise(r => { let d = ''; req.on('data', c => d += c); req.on('end', () => r(d)); });
 }
 
 // ------------------------------------------------------------------
-// Shell HTML
+// Shell HTML — uses CDN for gun.js, not /gun/gun.js middleware
 // ------------------------------------------------------------------
 
-function buildShellHTML(bucket) {
-  // Browser always connects to its own localhost relay.
-  // Gun peers with the other relays in the background.
-  // All peers included so Gun can sync across machines.
+function shellHTML(bucket) {
+  // All peers: localhost + LAN IPs + discovered remotes
   const peersJSON = JSON.stringify(PEERS);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${bucket}</title>
-  <style>
-    html, body, #scene { margin:0; padding:0; width:100vw; height:100vh; overflow:hidden; background:#000; }
-    #scene { position:relative; }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${bucket}</title>
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"><\/script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"><\/script>
+<style>html,body,#scene{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#000}#scene{position:relative}</style>
 </head>
 <body>
 <div id="scene"></div>
-<script src="/gun/gun.js"></script>
-<script src="/gun/sea.js"></script>
 <script>
 (function(){
-  'use strict';
+  var ALL_PEERS=${peersJSON};
+  var o=location.origin+'/gun';
+  if(ALL_PEERS.indexOf(o)===-1) ALL_PEERS.unshift(o);
+  var bucket=${JSON.stringify(bucket)};
 
-  // Every peer: our own relay + all LAN relays the Python client discovered
-  var ALL_PEERS = ${peersJSON};
-  // Always include our own origin (covers localhost access)
-  var origin = location.origin + '/gun';
-  if (ALL_PEERS.indexOf(origin) === -1) ALL_PEERS.unshift(origin);
+  var gun=Gun({peers:ALL_PEERS});
+  var scene=gun.get(bucket).get('scene');
+  var root=document.getElementById('scene');
+  var live={};
+  var AF=Object.getPrototypeOf(async function(){}).constructor;
+  var jsH={};
+  live["root"]=root;
 
-  var bucket = ${JSON.stringify(bucket)};
+  window.$gun=gun;
+  window.$scene=scene;
+  window.$root=root;
+  window.$bucket=bucket;
 
-  window.$gun = Gun({ peers: ALL_PEERS });
-  window.$root = window.$gun.get(bucket);
-  window.$scene = window.$root.get('scene');
-  window.$bucket = bucket;
+  var CF=['html','css','js','link','json','data','meta','links','actions','layer','fixed','portal'];
+  function has(d){return CF.some(function(f){return d[f]!==undefined&&d[f]!==null})}
+  function cleared(d){return !d||!has(d)}
+  function kid(k){return 'frag-'+String(k).replace(/[^\\w~-]/g,'_')}
+  function par(k){
+    if(k.includes('~'))return k.split('~')[0]||null;
+    var p=k.split('/').filter(Boolean);
+    return p.length<=1?null:p.slice(0,-1).join('/');
+  }
+  function host4(k){return live[k]||document.getElementById(kid(k))||null}
+  function rootS(e,l){e.style.position='fixed';e.style.inset='0';e.style.zIndex=String(l);e.style.pointerEvents=l<=0?'none':'auto'}
+  function childS(e,l){e.style.position='relative';e.style.flex='0 0 auto';e.style.minWidth='0';e.style.minHeight='';e.style.width='';e.style.height='';e.style.top='';e.style.left='';e.style.inset='';e.style.zIndex=String(l);e.style.pointerEvents=l<=0?'none':'auto'}
 
-  var root = document.getElementById('scene');
-  var live = {};
-  var AF = Object.getPrototypeOf(async function(){}).constructor;
-  var jsHashes = {};
-  live["root"] = root;
-
-  var CONTENT_FIELDS = [
-    'html','css','js','link','json','data','meta','links','actions',
-    'layer','fixed','portal'
-  ];
-
-  function hasContent(data) {
-    return CONTENT_FIELDS.some(function(f){ return data[f] !== undefined && data[f] !== null; });
+  function ensure(key,res,dat){
+    if(live[key])return live[key];
+    var h=document.createElement('div');h.id=kid(key);h.dataset.key=key;
+    var layer=Number(res&&res.layer||dat&&dat.layer||0)||0;
+    var pk=par(key);var isR=key.includes('~');
+    var wRoot=!!(res&&res.fixed||dat&&dat.fixed||res&&res.portal||dat&&dat.portal);
+    var ph=pk?host4(pk):null;
+    if(ph&&!wRoot){
+      childS(h,layer);
+      var mp;
+      if(isR){var row=ph.querySelector('[data-row]');if(!row){row=document.createElement('div');row.dataset.row='';row.style.display='flex';row.style.flex='1';row.style.width='100%';row.style.height='100%';row.style.minHeight='0';ph.appendChild(row)}mp=row}
+      else{mp=ph.querySelector('[data-children]')||ph}
+      mp.appendChild(h);
+    }else{rootS(h,layer);root.appendChild(h)}
+    live[key]=h;return h;
   }
 
-  function isCleared(data) {
-    if (!data) return true;
-    return !hasContent(data);
+  function restyle(h,key,res,dat){
+    var layer=Number(res&&res.layer||dat&&dat.layer||0)||0;
+    var pk=par(key);var wRoot=!!(res&&res.fixed||dat&&dat.fixed||res&&res.portal||dat&&dat.portal);
+    var ph=pk?host4(pk):null;
+    if(!ph||wRoot){rootS(h,layer);if(h.parentElement!==root)root.appendChild(h);return}
+    childS(h,layer);
+    var isR=key.includes('~');var mp;
+    if(isR){var row=ph.querySelector('[data-row]');if(!row){row=document.createElement('div');row.dataset.row='';row.style.display='flex';row.style.flex='1';row.style.width='100%';row.style.height='100%';row.style.minHeight='0';ph.appendChild(row)}mp=row}
+    else{mp=ph.querySelector('[data-children]')||ph}
+    if(h.parentElement!==mp)mp.appendChild(h);
   }
 
-  function keyToId(key) {
-    return 'frag-' + String(key).replace(/[^\\w~-]/g, '_');
+  function prune(){var rows=root.querySelectorAll('[data-row]');for(var i=0;i<rows.length;i++)if(!rows[i].children.length)rows[i].remove()}
+
+  function cleanup(key){
+    if(key==='root')return;
+    var a=key+'/',b=key+'~';
+    for(var k of Object.keys(live)){if(k==='root')continue;if(k===key||k.startsWith(a)||k.startsWith(b)){if(live[k])live[k].remove();delete live[k];var c=document.getElementById('css-'+k);if(c)c.remove();delete jsH[k]}}
+    prune();
   }
 
-  function parentKeyOf(key) {
-    if (key.includes("~")) return key.split("~")[0] || null;
-    var parts = key.split("/").filter(Boolean);
-    if (parts.length <= 1) return null;
-    return parts.slice(0, -1).join("/");
-  }
+  function qh(s){var h=0;for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h}
 
-  function hostForKey(key) {
-    return live[key] || document.getElementById(keyToId(key)) || null;
-  }
-
-  function rootMountStyle(el, layer) {
-    el.style.position = 'fixed';
-    el.style.inset = '0';
-    el.style.zIndex = String(layer);
-    el.style.pointerEvents = layer <= 0 ? 'none' : 'auto';
-  }
-
-  function childMountStyle(el, layer) {
-    el.style.position = 'relative';
-    el.style.flex = '1';
-    el.style.minWidth = '0';
-    el.style.minHeight = '0';
-    el.style.width = '';
-    el.style.height = '';
-    el.style.top = '';
-    el.style.left = '';
-    el.style.inset = '';
-    el.style.zIndex = String(layer);
-    el.style.pointerEvents = layer <= 0 ? 'none' : 'auto';
-  }
-
-  function ensureHost(key, resolved, data) {
-    if (live[key]) return live[key];
-    var host = document.createElement('div');
-    host.id = keyToId(key);
-    host.dataset.key = key;
-    host.dataset.owner = key;
-    var layer = Number(resolved && resolved.layer || data && data.layer || 0) || 0;
-    var parentKey = parentKeyOf(key);
-    var isRow = key.includes("~");
-    var wantsRoot = !!(resolved && resolved.fixed || data && data.fixed || resolved && resolved.portal || data && data.portal);
-    var parentHost = parentKey ? hostForKey(parentKey) : null;
-
-    if (parentHost && !wantsRoot) {
-      childMountStyle(host, layer);
-      var mountPoint;
-      if (isRow) {
-        var row = parentHost.querySelector("[data-row]");
-        if (!row) {
-          row = document.createElement("div");
-          row.dataset.row = "";
-          row.style.display = "flex";
-          row.style.flex = "1";
-          row.style.width = "100%";
-          row.style.height = "100%";
-          row.style.minHeight = "0";
-          parentHost.appendChild(row);
-        }
-        mountPoint = row;
-      } else {
-        mountPoint = parentHost.querySelector('[data-children]') || parentHost;
-      }
-      mountPoint.appendChild(host);
-    } else {
-      rootMountStyle(host, layer);
-      root.appendChild(host);
-    }
-    live[key] = host;
-    return host;
-  }
-
-  function restyleHost(host, key, resolved, data) {
-    var layer = Number(resolved && resolved.layer || data && data.layer || 0) || 0;
-    var parentKey = parentKeyOf(key);
-    var wantsRoot = !!(resolved && resolved.fixed || data && data.fixed || resolved && resolved.portal || data && data.portal);
-    var parentHost = parentKey ? hostForKey(parentKey) : null;
-
-    if (!parentHost || wantsRoot) {
-      rootMountStyle(host, layer);
-      if (host.parentElement !== root) root.appendChild(host);
-      return;
-    }
-    childMountStyle(host, layer);
-    var isRow = key.includes("~");
-    var mountPoint;
-    if (isRow) {
-      var row = parentHost.querySelector("[data-row]");
-      if (!row) {
-        row = document.createElement("div");
-        row.dataset.row = "";
-        row.style.display = "flex"; row.style.flex = "1";
-        row.style.width = "100%"; row.style.height = "100%"; row.style.minHeight = "0";
-        parentHost.appendChild(row);
-      }
-      mountPoint = row;
-    } else {
-      mountPoint = parentHost.querySelector('[data-children]') || parentHost;
-    }
-    if (host.parentElement !== mountPoint) mountPoint.appendChild(host);
-  }
-
-  function pruneEmptyRows() {
-    var rows = root.querySelectorAll("[data-row]");
-    for (var i = 0; i < rows.length; i++) {
-      if (!rows[i].children.length) rows[i].remove();
-    }
-  }
-
-  function cleanup(key) {
-    if (key === "root") return;
-    var prefixA = key + '/', prefixB = key + '~';
-    for (var k of Object.keys(live)) {
-      if (k === "root") continue;
-      if (k === key || k.startsWith(prefixA) || k.startsWith(prefixB)) {
-        if (live[k]) live[k].remove();
-        delete live[k];
-        var css = document.getElementById('css-' + k);
-        if (css) css.remove();
-        delete jsHashes[k];
-      }
-    }
-    pruneEmptyRows();
-  }
-
-  function quickHash(str) {
-    var h = 0;
-    for (var i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
-    return h;
-  }
-
-  function applyBindings(host, resolved) {
-    var nodes = host.querySelectorAll("[data-bind-text],[data-bind-html],[data-bind-style]");
-    for (var i = 0; i < nodes.length; i++) {
-      var el = nodes[i];
-      if (el.dataset.bindText && resolved[el.dataset.bindText] !== undefined)
-        el.textContent = resolved[el.dataset.bindText];
-      if (el.dataset.bindHtml && resolved[el.dataset.bindHtml] !== undefined)
-        el.innerHTML = resolved[el.dataset.bindHtml];
-      if (el.dataset.bindStyle) {
-        var pairs = el.dataset.bindStyle.split(";").map(function(x){return x.trim();}).filter(Boolean);
-        for (var j = 0; j < pairs.length; j++) {
-          var parts = pairs[j].split(":").map(function(x){return x.trim();});
-          if (parts[0] && parts[1] && resolved[parts[1]] !== undefined)
-            el.style[parts[0]] = resolved[parts[1]];
-        }
+  function bind(host,res){
+    var nodes=host.querySelectorAll('[data-bind-text],[data-bind-html],[data-bind-style]');
+    for(var i=0;i<nodes.length;i++){
+      var el=nodes[i];
+      if(el.dataset.bindText&&res[el.dataset.bindText]!==undefined)el.textContent=res[el.dataset.bindText];
+      if(el.dataset.bindHtml&&res[el.dataset.bindHtml]!==undefined)el.innerHTML=res[el.dataset.bindHtml];
+      if(el.dataset.bindStyle){
+        var pairs=el.dataset.bindStyle.split(';');
+        for(var j=0;j<pairs.length;j++){var pp=pairs[j].split(':');if(pp[0]&&pp[1]&&res[pp[1].trim()]!==undefined)el.style[pp[0].trim()]=res[pp[1].trim()]}
       }
     }
   }
 
-  async function renderResolved(data, key, resolved) {
-    if (!resolved) return;
-    if (resolved.css != null) {
-      var s = document.getElementById('css-' + key);
-      if (!s) { s = document.createElement('style'); s.id = 'css-' + key; document.head.appendChild(s); }
-      s.textContent = resolved.css;
-    }
-    if (resolved.html != null) {
-      var host = ensureHost(key, resolved, data);
-      restyleHost(host, key, resolved, data);
-      if (!host._mounted) { host.innerHTML = resolved.html; host._mounted = true; }
-      applyBindings(host, resolved);
-    }
-    if (resolved.js != null) {
-      var h = quickHash(resolved.js);
-      if (jsHashes[key] !== h) {
-        jsHashes[key] = h;
-        try { await new AF(resolved.js)(); } catch(e) { console.error('[' + key + ']', e); }
-      }
-    }
+  async function renderR(dat,key,res){
+    if(!res)return;
+    if(res.css!=null){var s=document.getElementById('css-'+key);if(!s){s=document.createElement('style');s.id='css-'+key;document.head.appendChild(s)}s.textContent=res.css}
+    if(res.html!=null){var h=ensure(key,res,dat);restyle(h,key,res,dat);if(!h._m){h.innerHTML=res.html;h._m=true}bind(h,res)}
+    if(res.js!=null){var hh=qh(res.js);if(jsH[key]!==hh){jsH[key]=hh;try{await new AF(res.js)()}catch(e){console.error('['+key+']',e)}}}
   }
 
-  async function render(data, key) {
-    if (!data || key === '_') return;
-    if (isCleared(data)) { cleanup(key); return; }
-    await renderResolved(data, key, data);
+  async function render(dat,key){
+    if(!dat||key==='_')return;
+    if(cleared(dat)){cleanup(key);return}
+    await renderR(dat,key,dat);
   }
 
-  window.$scene.map().on(function(data, key){ render(data, key); });
+  scene.map().on(function(d,k){render(d,k)});
 
-  async function syncFromSnapshot() {
-    try {
-      var resp = await fetch('/' + bucket + '/api/snapshot', {cache:'no-store'});
-      var snap = await resp.json();
-      if (!snap || typeof snap !== 'object') return;
-      var keys = Object.keys(snap).sort(function(a,b){
-        return a.replace(/~/g,'/').split('/').length - b.replace(/~/g,'/').split('/').length;
-      });
-      var wanted = new Set(keys);
-      for (var i = 0; i < keys.length; i++) await render(snap[keys[i]], keys[i]);
-      for (var k of Object.keys(live)) {
-        if (k === "root") continue;
-        if (!wanted.has(k)) cleanup(k);
-      }
-    } catch(e) { console.warn('[snapshot sync]', e); }
+  async function sync(){
+    try{
+      var r=await fetch('/'+bucket+'/api/snapshot',{cache:'no-store'});
+      var snap=await r.json();
+      if(!snap||typeof snap!=='object')return;
+      var keys=Object.keys(snap).sort(function(a,b){return a.replace(/~/g,'/').split('/').length-b.replace(/~/g,'/').split('/').length});
+      var w=new Set(keys);
+      for(var i=0;i<keys.length;i++)await render(snap[keys[i]],keys[i]);
+      for(var k of Object.keys(live)){if(k==='root')continue;if(!w.has(k))cleanup(k)}
+    }catch(e){console.warn('[sync]',e)}
   }
 
-  (async function(){
-    await syncFromSnapshot();
-    setInterval(syncFromSnapshot, 250);
-  })();
+  (async function(){await sync();setInterval(sync,250)})();
 })();
-</script>
+<\/script>
 </body>
 </html>`;
 }
 
 // ------------------------------------------------------------------
-// HTTP server
+// HTTP Server
 // ------------------------------------------------------------------
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const segs = parsed.pathname.split('/').filter(Boolean);
 
-  // Gun handles /gun/* itself
+  // Let Gun handle /gun/*
   if (segs[0] === 'gun') return;
 
   // Root
@@ -431,11 +265,10 @@ const server = http.createServer(async (req, res) => {
   subscribe(bkt);
   const b = getBucket(bkt);
 
-  // Shell HTML
+  // Shell
   if (req.method === 'GET' && (action === '' || action === 'index.html')) {
-    const html = buildShellHTML(bkt);
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    return res.end(html);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(shellHTML(bkt));
   }
 
   // Scene CRUD
@@ -451,21 +284,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'DELETE') {
       if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
-      nullOutDescendants(bkt, b.snapshot, rest);
+      nullOutDesc(bkt, b.snapshot, rest);
       deleteSnapshotPath(b, rest);
       return sendJson(res, { ok: true, path: rest });
     }
-    if (req.method === 'GET') {
-      return sendJson(res, b.snapshot[rest] || null);
-    }
+    if (req.method === 'GET') { return sendJson(res, b.snapshot[rest] || null); }
   }
 
-  // Fragment shorthand
+  // Frag
   if (action === 'frag' && rest) {
     if (req.method === 'GET') {
-      const html = b.snapshot[rest] ? (b.snapshot[rest].html || '') : '';
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      return res.end(html);
+      return res.end(b.snapshot[rest] ? (b.snapshot[rest].html || '') : '');
     }
     if (req.method === 'POST') {
       if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
@@ -487,16 +317,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && rest === 'stats') return sendJson(res, { fragments: Object.keys(b.snapshot).length, auth: !!tokens[bkt] });
     if (req.method === 'POST' && rest === 'clear') {
       if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
-      const keys = Object.keys(b.snapshot);
-      for (const key of keys) nullOut(bkt, key);
+      for (const key of Object.keys(b.snapshot)) nullOut(bkt, key);
       b.snapshot = {};
-      return sendJson(res, { ok: true, cleared: keys.length });
+      return sendJson(res, { ok: true });
     }
     if (req.method === 'POST' && rest === 'auth') {
       try {
         const { token } = JSON.parse(await readBody(req));
         if (!token) delete tokens[bkt]; else tokens[bkt] = token;
-        return sendJson(res, { ok: true, auth: !!tokens[bkt] });
+        return sendJson(res, { ok: true });
       } catch (e) { return sendJson(res, { error: 'need {token}' }, 400); }
     }
   }
@@ -504,9 +333,10 @@ const server = http.createServer(async (req, res) => {
   if (!res.headersSent) { res.writeHead(404); res.end('Not found'); }
 });
 
+// Gun peers with other relays AND serves websocket on this server
 const gun = Gun({ peers: PEERS, web: server });
 
 server.listen(PORT, BIND, () => {
   console.log(`Relay: http://localhost:${PORT}`);
-  if (PEERS.length) console.log(`Peering with: ${PEERS.join(', ')}`);
+  if (PEERS.length) console.log('Peering: ' + PEERS.join(', '));
 });

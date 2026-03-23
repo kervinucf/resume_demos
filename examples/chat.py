@@ -1,43 +1,27 @@
 #!/usr/bin/env python3
 """
-Chat — two machines, same WiFi, zero config.
-
     pip install zeroconf
-
-    # Machine A
-    python -m examples.chat --discovery lan
-
-    # Machine B (same command, finds A via mDNS, syncs via Gun)
-    python -m examples.chat --discovery lan
-
-    Both print: open in browser: http://localhost:8765/chat
-    Open that on each machine. Messages sync automatically.
+    python -m examples.chat --discovery lan     # both machines, same command
+    open http://localhost:8765/chat              # on each machine
 """
 
-import argparse
-import json
-import time
+import argparse, json, time
 from HyperCoreSDK.client import HyperClient
 
-parser = argparse.ArgumentParser(description="HyperChat")
-parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
-parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
-parser.add_argument("--peers", nargs="*", default=[])
-parser.add_argument("--port", type=int, default=8765)
-parser.add_argument("--root", default="chat")
-args = parser.parse_args()
+p = argparse.ArgumentParser()
+p.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
+p.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
+p.add_argument("--peers", nargs="*", default=[])
+p.add_argument("--port", type=int, default=8765)
+p.add_argument("--root", default="chat")
+a = p.parse_args()
 
-hc = HyperClient(
-    root=args.root,
-    discovery=args.discovery,
-    relay=args.relay,
-    peers=[f"http://{p}:{args.port}" for p in args.peers],
-    port=args.port,
-)
+hc = HyperClient(root=a.root, discovery=a.discovery, relay=a.relay,
+    peers=[f"http://{x}:{a.port}" for x in a.peers], port=a.port)
 hc.connect()
 hc.clear()
 
-CHAT_HTML = """
+CHAT = """
 <div style="width:100%;height:100%;display:flex;flex-direction:column;background:#111827;color:#e5e7eb;font-family:Arial,sans-serif">
   <div style="padding:12px 14px;border-bottom:1px solid #374151;display:flex;justify-content:space-between;align-items:center">
     <span data-bind-text="title" style="font-weight:700"></span>
@@ -52,7 +36,7 @@ CHAT_HTML = """
 </div>
 """
 
-MSG_HTML = """
+MSG = """
 <div style="padding:8px 10px;background:#1f2937;border:1px solid #374151;border-radius:10px">
   <div style="display:flex;justify-content:space-between;align-items:baseline">
     <span data-bind-text="user" style="font-size:12px;color:#93c5fd"></span>
@@ -62,7 +46,7 @@ MSG_HTML = """
 </div>
 """
 
-CHAT_JS = r"""
+JS = r"""
 (function(){
   const m=document.getElementById("m"),u=document.getElementById("u"),s=document.getElementById("s");
   if(!m||!u||!s||s.dataset.on)return; s.dataset.on=1;
@@ -78,23 +62,19 @@ CHAT_JS = r"""
 })();
 """
 
-hc.mount("root/chat", html=CHAT_HTML, js=CHAT_JS, fixed=True, layer=10)
+hc.mount("root/chat", html=CHAT, js=JS, fixed=True, layer=10)
 hc.write("root/chat", title="general", mode=f"{hc.discovery} · {hc.machine_id[:16]}")
 
 seen = set()
 while True:
     for k, v in (hc.snapshot() or {}).items():
-        if not k.startswith("inbox/") or k in seen:
-            continue
+        if not k.startswith("inbox/") or k in seen: continue
         seen.add(k)
         try:
-            raw = v.get("data", "{}")
-            msg = json.loads(raw) if isinstance(raw, str) else raw
-        except Exception:
-            continue
-        out = "root/chat/" + k.split("/", 1)[1]
-        hc.mount(out, html=MSG_HTML)
-        hc.write(out, user=msg.get("user", "guest"),
-                 text=msg.get("text", ""), machine=hc.machine_id[:16])
+            raw = v.get("data", "{}"); msg = json.loads(raw) if isinstance(raw, str) else raw
+        except: continue
+        hc.mount("root/chat/" + k.split("/",1)[1], html=MSG)
+        hc.write("root/chat/" + k.split("/",1)[1], user=msg.get("user","guest"),
+            text=msg.get("text",""), machine=hc.machine_id[:16])
         hc.remove(k)
     time.sleep(0.1)
