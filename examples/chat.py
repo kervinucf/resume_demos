@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """
-Chat — two flags, that's it.
+Chat — two machines, same WiFi, zero config.
 
-    python chat.py                                              # local, auto-host
-    python chat.py --discovery lan                              # LAN, auto-promote if needed
-    python chat.py --discovery lan --relay host                 # LAN, always be the server
-    python chat.py --discovery lan --relay join                 # LAN, join only, fail if no server
-    python chat.py --discovery trusted --peers 10.0.0.5        # explicit peer list
+    pip install zeroconf
+
+    # Machine A — just run it
+    python -m examples.chat --discovery lan
+
+    # Machine B — just run it (finds A via mDNS, or becomes host if A isn't up yet)
+    python -m examples.chat --discovery lan
+
+That's it. No IPs, no peer lists, no coordination.
+
+Other modes still work:
+    python -m examples.chat                                          # local only
+    python -m examples.chat --discovery lan --relay host             # force host
+    python -m examples.chat --discovery lan --relay join             # join only
+    python -m examples.chat --discovery trusted --peers 10.0.0.5    # explicit
 """
 
 import argparse
@@ -15,7 +25,7 @@ import time
 from HyperCoreSDK.client import HyperClient
 
 # ------------------------------------------------------------------
-# Args — two flags
+# Args
 # ------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="HyperChat")
 parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"],
@@ -29,7 +39,7 @@ parser.add_argument("--root", default="chat")
 args = parser.parse_args()
 
 # ------------------------------------------------------------------
-# Connect
+# Connect — one call
 # ------------------------------------------------------------------
 hc = HyperClient(
     root=args.root,
@@ -89,7 +99,7 @@ CHAT_JS = r"""
 # Mount
 # ------------------------------------------------------------------
 role = "hosting" if hc.is_hosting else "joined"
-label = f"{hc.discovery} · {role} · {hc.machine_id[:12]}"
+label = f"{hc.discovery} · {role} · {hc.machine_id[:16]}"
 
 hc.mount("root/chat", html=CHAT_HTML, js=CHAT_JS, fixed=True, layer=10)
 hc.write("root/chat", title="general", mode=label)
@@ -117,7 +127,7 @@ while True:
         hc.write(out,
                  user=msg.get("user", "guest"),
                  text=msg.get("text", ""),
-                 machine=hc.machine_id[:12])
+                 machine=hc.machine_id[:16])
 
         hc.remove(k)
 
