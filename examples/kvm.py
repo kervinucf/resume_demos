@@ -111,12 +111,20 @@ class WinBT(BTBackend):
 
     def name(self): return "powershell"
 
+    # Names that are BLE service descriptors, not real devices
+    NOISE = {
+        "generic attribute profile", "generic access profile",
+        "device information service", "service discovery service",
+        "bluetooth le generic attribute service", "bluetooth device (rfcomm protocol tdi)",
+    }
+
     def scan(self):
         try:
-            # Get paired BT devices
+            # Query both Bluetooth and BTHLE classes
             ps = (
-                'Get-PnpDevice -Class Bluetooth -Status OK | '
-                'Select-Object FriendlyName,InstanceId,Status | '
+                'Get-PnpDevice -Class Bluetooth,BTHLE,BTHLEDevice -Status OK '
+                '-ErrorAction SilentlyContinue | '
+                'Select-Object FriendlyName,InstanceId,Status,Class | '
                 'ConvertTo-Json'
             )
             out = subprocess.check_output(
@@ -125,22 +133,44 @@ class WinBT(BTBackend):
             if isinstance(raw, dict):
                 raw = [raw]
 
-            devices = []
+            # Collect real devices, dedupe by address
+            seen_addr = {}
             for d in raw:
                 name = d.get("FriendlyName", "Unknown")
                 iid = d.get("InstanceId", "")
-                # Extract BT address from InstanceId if present
-                addr = self._extract_addr(iid)
-                if not addr or "radio" in name.lower() or "enumerator" in name.lower():
+
+                # Skip noise: BLE service descriptors, radio adapters, enumerators
+                nl = name.lower().strip()
+                if nl in self.NOISE:
                     continue
-                devices.append({
+                if any(skip in nl for skip in ["radio", "enumerator", "protocol tdi"]):
+                    continue
+                # Skip anything that looks like a GATT service UUID
+                if "bthledevice" in iid.lower() and "{0000" in iid.lower():
+                    continue
+
+                addr = self._extract_addr(iid)
+                if not addr:
+                    continue
+
+                # Deduplicate: keep the entry with the friendliest name
+                if addr in seen_addr:
+                    # prefer the shorter/cleaner name
+                    existing = seen_addr[addr]
+                    if len(name) < len(existing["name"]):
+                        seen_addr[addr]["name"] = name
+                    continue
+
+                seen_addr[addr] = {
                     "address": addr,
                     "name": name,
                     "connected": d.get("Status") == "OK",
                     "paired": True,
                     "type": self._guess_type(name),
-                })
-            return devices
+                    "instance_id": iid,
+                }
+
+            return list(seen_addr.values())
         except Exception as e:
             print(f"BT scan failed: {e}")
             return []
@@ -184,9 +214,11 @@ class WinBT(BTBackend):
 
     def _guess_type(self, name):
         n = name.lower()
-        if any(k in n for k in ["keyboard", "keychron", "k380"]): return "keyboard"
-        if any(k in n for k in ["mouse", "trackpad", "mx master"]): return "mouse"
-        if any(k in n for k in ["airpod", "headphone", "buds", "speaker"]): return "audio"
+        if any(k in n for k in ["keyboard", "keychron", "k380", "k860", "mx keys", "g915"]): return "keyboard"
+        if any(k in n for k in ["mouse", "trackpad", "mx master", "m720", "ergo", "g502", "g pro"]): return "mouse"
+        if any(k in n for k in ["airpod", "headphone", "buds", "speaker", "jabra", "sony", "audio"]): return "audio"
+        if any(k in n for k in ["xbox", "controller", "gamepad", "dualsense", "joycon"]): return "gamepad"
+        if any(k in n for k in ["iphone", "ipad", "phone", "galaxy"]): return "phone"
         return "other"
 
 
@@ -311,6 +343,8 @@ def device_icon(dtype):
     if dtype == "keyboard": return "⌨️"
     if dtype == "mouse": return "🖱️"
     if dtype == "audio": return "🎧"
+    if dtype == "gamepad": return "🎮"
+    if dtype == "phone": return "📱"
     return "📶"
 
 

@@ -334,7 +334,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 // Gun peers with other relays AND serves websocket on this server
-const gun = Gun({ peers: PEERS, web: server });
+// radisk: false prevents the radata/ file storage errors on Windows
+const gun = Gun({ peers: PEERS, web: server, radisk: false });
 
 server.listen(PORT, BIND, () => {
   console.log(`Relay: http://localhost:${PORT}`);
