@@ -1,55 +1,216 @@
 #!/usr/bin/env python3
 """
-HyperFlow — mouse & keyboard sharing across machines.
+HyperFlow — switch Bluetooth devices between machines.
 
-    pip install zeroconf pynput
+    pip install zeroconf
 
-    # Machine A (Windows)
+    Mac:    brew install blueutil
+    Win:    (uses built-in PowerShell)
+
+    # Both machines
     python -m examples.hyperflow --discovery lan
 
-    # Machine B (Mac)
-    python -m examples.hyperflow --discovery lan
+    Open http://localhost:8765/hyperflow
+    See all BT devices on all machines. Click to steal a device.
 
-    Open http://localhost:8765/hyperflow on either machine.
-    Click a machine to route your keyboard + mouse there.
+How it works:
+    Each machine scans its Bluetooth adapter and writes the device list
+    to the shared graph. The web UI shows every device on every machine.
+    When you click "connect" on a device, that machine's script runs
+    the native BT connect command. The device switches over.
 
-Architecture:
-    Each machine runs this script. It does three things:
-    1. Lists its own input devices and writes them to the graph
-    2. Shows a web UI with all machines and a "send input here" toggle
-    3. When active: captures local mouse/keyboard, writes events to graph
-       When target: reads events from graph, injects them locally
-
-    The hyper relay syncs the graph between machines via Gun.
-    pynput handles OS-level input capture and injection.
+    No input interception. No accessibility permissions. No pynput.
+    Just Bluetooth connection management.
 """
 
 import argparse
 import json
 import platform
-import threading
+import subprocess
 import time
-import sys
 
 from HyperCoreSDK.client import HyperClient
 
-# ---------------------------------------------------------------------------
-# pynput availability
-# ---------------------------------------------------------------------------
-try:
-    from pynput import keyboard, mouse
-    from pynput.keyboard import Key, Controller as KBController
-    from pynput.mouse import Button, Controller as MouseController
-    HAS_PYNPUT = True
-except ImportError:
-    HAS_PYNPUT = False
-    print("WARNING: pynput not installed — pip install pynput")
-    print("         Input forwarding disabled, UI-only mode.")
+MY_OS = platform.system()
 
 # ---------------------------------------------------------------------------
-# Args
+# Bluetooth backends
 # ---------------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="HyperFlow — KVM over LAN")
+
+class BTBackend:
+    """Base — no-op."""
+    def scan(self): return []
+    def connect(self, addr): return False, "not supported"
+    def disconnect(self, addr): return False, "not supported"
+    def name(self): return "none"
+
+
+class MacBT(BTBackend):
+    """Uses blueutil (brew install blueutil)."""
+
+    def name(self): return "blueutil"
+
+    def _run(self, *args):
+        try:
+            out = subprocess.check_output(["blueutil"] + list(args), timeout=10, text=True)
+            return True, out.strip()
+        except FileNotFoundError:
+            return False, "blueutil not found — brew install blueutil"
+        except subprocess.CalledProcessError as e:
+            return False, str(e)
+        except Exception as e:
+            return False, str(e)
+
+    def scan(self):
+        ok, out = self._run("--paired", "--format", "json")
+        if not ok:
+            print(f"BT scan failed: {out}")
+            return []
+
+        try:
+            raw = json.loads(out)
+        except:
+            return []
+
+        devices = []
+        for d in raw:
+            devices.append({
+                "address": d.get("address", ""),
+                "name": d.get("name", "Unknown"),
+                "connected": d.get("connected", False),
+                "paired": True,
+                "type": self._guess_type(d.get("name", "")),
+            })
+        return devices
+
+    def connect(self, addr):
+        ok, out = self._run("--connect", addr)
+        if ok:
+            # wait a beat for connection
+            time.sleep(1)
+            return True, f"connected {addr}"
+        return False, out
+
+    def disconnect(self, addr):
+        ok, out = self._run("--disconnect", addr)
+        return ok, out if not ok else f"disconnected {addr}"
+
+    def _guess_type(self, name):
+        n = name.lower()
+        if any(k in n for k in ["keyboard", "keychron", "hhkb", "k380", "k860", "mx keys"]):
+            return "keyboard"
+        if any(k in n for k in ["mouse", "trackpad", "mx master", "m720", "ergo"]):
+            return "mouse"
+        if any(k in n for k in ["airpod", "headphone", "buds", "speaker", "jabra", "sony"]):
+            return "audio"
+        return "other"
+
+
+class WinBT(BTBackend):
+    """Uses PowerShell to manage Bluetooth."""
+
+    def name(self): return "powershell"
+
+    def scan(self):
+        try:
+            # Get paired BT devices
+            ps = (
+                'Get-PnpDevice -Class Bluetooth -Status OK | '
+                'Select-Object FriendlyName,InstanceId,Status | '
+                'ConvertTo-Json'
+            )
+            out = subprocess.check_output(
+                ["powershell", "-Command", ps], timeout=10, text=True)
+            raw = json.loads(out)
+            if isinstance(raw, dict):
+                raw = [raw]
+
+            devices = []
+            for d in raw:
+                name = d.get("FriendlyName", "Unknown")
+                iid = d.get("InstanceId", "")
+                # Extract BT address from InstanceId if present
+                addr = self._extract_addr(iid)
+                if not addr or "radio" in name.lower() or "enumerator" in name.lower():
+                    continue
+                devices.append({
+                    "address": addr,
+                    "name": name,
+                    "connected": d.get("Status") == "OK",
+                    "paired": True,
+                    "type": self._guess_type(name),
+                })
+            return devices
+        except Exception as e:
+            print(f"BT scan failed: {e}")
+            return []
+
+    def connect(self, addr):
+        # Windows BT connect via PowerShell/devcon is limited
+        # The most reliable way is via the BT settings UI
+        # For programmatic control we can try:
+        try:
+            ps = f'''
+            $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like "*{addr.replace(':','')}*" }}
+            if ($device) {{ Enable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false }}
+            '''
+            subprocess.check_output(["powershell", "-Command", ps], timeout=10, text=True)
+            return True, f"enabled {addr}"
+        except Exception as e:
+            return False, str(e)
+
+    def disconnect(self, addr):
+        try:
+            ps = f'''
+            $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like "*{addr.replace(':','')}*" }}
+            if ($device) {{ Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false }}
+            '''
+            subprocess.check_output(["powershell", "-Command", ps], timeout=10, text=True)
+            return True, f"disabled {addr}"
+        except Exception as e:
+            return False, str(e)
+
+    def _extract_addr(self, instance_id):
+        """Try to pull a BT MAC from the PnP InstanceId."""
+        # Format: BTHENUM\{...}_VID&..._PID&...\{addr}
+        # or BLUETOOTHDEVICE\xx:xx:xx:xx:xx:xx
+        parts = instance_id.replace("\\", "/").split("/")
+        for part in parts:
+            clean = part.replace("-", "").replace(":", "")
+            if len(clean) == 12 and all(c in "0123456789abcdefABCDEF" for c in clean):
+                # Format as XX:XX:XX:XX:XX:XX
+                return ":".join(clean[i:i+2] for i in range(0, 12, 2)).upper()
+        return instance_id[:20]  # fallback — use truncated ID
+
+    def _guess_type(self, name):
+        n = name.lower()
+        if any(k in n for k in ["keyboard", "keychron", "k380"]): return "keyboard"
+        if any(k in n for k in ["mouse", "trackpad", "mx master"]): return "mouse"
+        if any(k in n for k in ["airpod", "headphone", "buds", "speaker"]): return "audio"
+        return "other"
+
+
+def get_bt():
+    if MY_OS == "Darwin":
+        b = MacBT()
+        ok, _ = b._run("--version")
+        if ok:
+            print("bluetooth: blueutil (macOS)")
+            return b
+        print("bluetooth: blueutil not found — brew install blueutil")
+
+    if MY_OS == "Windows":
+        print("bluetooth: powershell (Windows)")
+        return WinBT()
+
+    print("bluetooth: not supported on this OS")
+    return BTBackend()
+
+
+# ---------------------------------------------------------------------------
+# Args & Connect
+# ---------------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="HyperFlow — BT device switching")
 parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
 parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
 parser.add_argument("--peers", nargs="*", default=[])
@@ -57,84 +218,17 @@ parser.add_argument("--port", type=int, default=8765)
 parser.add_argument("--root", default="hyperflow")
 args = parser.parse_args()
 
-# ---------------------------------------------------------------------------
-# Connect
-# ---------------------------------------------------------------------------
-hc = HyperClient(
-    root=args.root, discovery=args.discovery, relay=args.relay,
-    peers=[f"http://{p}:{args.port}" for p in args.peers], port=args.port,
-)
+hc = HyperClient(root=args.root, discovery=args.discovery, relay=args.relay,
+    peers=[f"http://{p}:{args.port}" for p in args.peers], port=args.port)
 hc.connect()
-
-# Don't hc.clear() — that would wipe the other machine's registration.
-# Only clean up our own UI mount point.
-hc.remove("root/dash")
+hc.clear()
 
 ME = hc.machine_id
 MY_NAME = hc.machine_name
-MY_OS = platform.system()  # "Windows" or "Darwin"
+bt = get_bt()
 
 # ---------------------------------------------------------------------------
-# Device enumeration (best-effort, cross-platform)
-# ---------------------------------------------------------------------------
-def list_devices():
-    """Return a list of dicts describing connected input devices."""
-    devices = []
-    # pynput doesn't enumerate devices, but we can describe what's available
-    devices.append({"name": "System Keyboard", "type": "keyboard", "id": "kb_0"})
-    devices.append({"name": "System Mouse/Trackpad", "type": "mouse", "id": "mouse_0"})
-
-    # On mac, try to list Bluetooth devices
-    if MY_OS == "Darwin":
-        try:
-            import subprocess
-            out = subprocess.check_output(
-                ["system_profiler", "SPBluetoothDataType", "-json"],
-                timeout=5, text=True
-            )
-            bt = json.loads(out)
-            items = bt.get("SPBluetoothDataType", [{}])
-            for section in items:
-                connected = section.get("device_connected", section.get("devices_connected", []))
-                if isinstance(connected, list):
-                    for dev in connected:
-                        if isinstance(dev, dict):
-                            for name, info in dev.items():
-                                devices.append({
-                                    "name": f"BT: {name}",
-                                    "type": "bluetooth",
-                                    "id": f"bt_{name.replace(' ', '_').lower()}"
-                                })
-        except Exception:
-            pass
-
-    # On Windows, try WMI for keyboards/mice
-    if MY_OS == "Windows":
-        try:
-            import subprocess
-            out = subprocess.check_output(
-                ["powershell", "-Command",
-                 "Get-PnpDevice -Class Keyboard,Mouse -Status OK | Select-Object FriendlyName,Class | ConvertTo-Json"],
-                timeout=5, text=True
-            )
-            devs = json.loads(out)
-            if isinstance(devs, dict): devs = [devs]
-            for d in devs:
-                name = d.get("FriendlyName", "Unknown")
-                cls = d.get("Class", "").lower()
-                dtype = "keyboard" if "keyboard" in cls else "mouse"
-                devices.append({
-                    "name": name,
-                    "type": dtype,
-                    "id": f"pnp_{name.replace(' ', '_').lower()[:20]}"
-                })
-        except Exception:
-            pass
-
-    return devices
-
-# ---------------------------------------------------------------------------
-# UI Templates
+# UI
 # ---------------------------------------------------------------------------
 
 DASH_HTML = """
@@ -143,216 +237,152 @@ DASH_HTML = """
   <div style="padding:20px 24px;background:#111;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center">
     <div style="display:flex;align-items:center;gap:12px">
       <div style="font-size:22px;font-weight:800;letter-spacing:1px;color:#818cf8">HYPERFLOW</div>
-      <div style="font-size:12px;color:#555;background:#1a1a1a;padding:4px 10px;border-radius:4px" data-bind-text="status">connecting...</div>
+      <div style="font-size:12px;color:#555;background:#1a1a1a;padding:4px 10px;border-radius:4px" data-bind-text="status">scanning...</div>
     </div>
-    <div style="font-size:11px;color:#555" data-bind-text="me"></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="btn_scan" style="padding:6px 14px;background:#1a1a1a;color:#818cf8;border:1px solid #333;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Rescan</button>
+      <div style="font-size:11px;color:#555" data-bind-text="me"></div>
+    </div>
   </div>
 
-  <div style="flex:1;display:flex;padding:24px;gap:24px;overflow:auto">
-    <div data-children style="display:flex;gap:24px;flex:1"></div>
+  <div style="flex:1;overflow:auto;padding:24px">
+    <div data-children style="display:flex;flex-direction:column;gap:16px"></div>
   </div>
 
-  <div style="padding:12px 24px;background:#111;border-top:1px solid #222;display:flex;justify-content:space-between;align-items:center">
-    <div style="font-size:11px;color:#555">click a machine to route keyboard + mouse there</div>
-    <div style="font-size:11px;color:#555" data-bind-text="hint"></div>
-  </div>
+  <div style="padding:12px 24px;background:#111;border-top:1px solid #222;font-size:11px;color:#555" data-bind-text="log">ready</div>
 
 </div>
 """
 
 DASH_JS = r"""
 (function(){
-  if (document.getElementById("_hf_init")) return;
-  var m = document.createElement("div"); m.id = "_hf_init"; m.style.display = "none";
-  document.body.appendChild(m);
+  if(document.getElementById("_hf"))return;
+  var m=document.createElement("div");m.id="_hf";m.style.display="none";document.body.appendChild(m);
 
-  window.hfSelectTarget = function(machineId) {
-    window.$scene.get("inbox/" + Date.now() + "_" + Math.random().toString(36).slice(2,7)).put({
-      data: JSON.stringify({ type: "set_target", target: machineId })
+  window.hfAction=function(action, machine, addr){
+    window.$scene.get("inbox/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)).put({
+      data:JSON.stringify({type:action, machine:machine, address:addr})
     });
   };
+
+  var btn=document.getElementById("btn_scan");
+  if(btn&&!btn.dataset.on){
+    btn.dataset.on=1;
+    btn.onclick=function(){ window.hfAction("rescan","",""); };
+  }
 })();
 """
 
-MACHINE_CARD_HTML = """
-<div style="flex:1;min-width:280px;max-width:420px;background:#151515;border:2px solid #252525;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;cursor:pointer;transition:border-color 0.2s"
-     data-bind-style="borderColor:border_color">
-
-  <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #222">
-    <div>
-      <div data-bind-text="machine_name" style="font-weight:700;font-size:16px"></div>
-      <div data-bind-text="machine_os" style="font-size:11px;color:#666;margin-top:2px"></div>
+MACHINE_HTML = """
+<div style="background:#111;border:1px solid #222;border-radius:10px;overflow:hidden">
+  <div style="padding:14px 20px;background:#151515;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #222">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div data-bind-text="icon" style="font-size:20px"></div>
+      <div>
+        <div data-bind-text="mname" style="font-weight:700;font-size:15px"></div>
+        <div data-bind-text="msub" style="font-size:11px;color:#555"></div>
+      </div>
     </div>
-    <div data-bind-text="role_badge" style="font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;background:#1a1a1a"></div>
+    <div data-bind-text="mbadge" style="font-size:11px;padding:3px 8px;border-radius:4px;background:#1a1a1a;color:#818cf8"></div>
   </div>
-
-  <div style="padding:16px 20px;flex:1">
-    <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Devices</div>
-    <div data-bind-html="device_list" style="font-size:13px;line-height:1.8;color:#999"></div>
-  </div>
-
-  <div style="padding:12px 20px;background:#111;border-top:1px solid #222">
-    <div data-bind-text="latency" style="font-size:11px;color:#555"></div>
-  </div>
-
+  <div data-children style="display:flex;flex-direction:column"></div>
 </div>
 """
 
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
-current_target = ME  # which machine receives input (default: self)
-capturing = False
-kb_ctrl = KBController() if HAS_PYNPUT else None
-mouse_ctrl = MouseController() if HAS_PYNPUT else None
-input_lock = threading.Lock()
+DEVICE_HTML_TEMPLATE = """
+<div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1a1a1a">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="font-size:16px">{icon}</div>
+    <div>
+      <div style="font-size:13px;font-weight:500">{name}</div>
+      <div style="font-size:10px;color:#555">{addr}</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div style="width:8px;height:8px;border-radius:50%;background:{dot}"></div>
+    <span style="font-size:11px;color:{dot}">{conn_text}</span>
+    {buttons}
+  </div>
+</div>
+"""
 
-# ---------------------------------------------------------------------------
-# Input capture (runs in background thread when we're the source)
-# ---------------------------------------------------------------------------
-def start_capture():
-    global capturing
-    if not HAS_PYNPUT or capturing:
-        return
-    capturing = True
 
-    def on_key_press(key):
-        if current_target == ME:
-            return  # no forwarding to self
-        try:
-            k = key.char if hasattr(key, 'char') and key.char else str(key)
-        except:
-            k = str(key)
-        hc.write("_input/keyboard", machine=ME, target=current_target,
-                 action="press", key=k, t=time.time())
+def device_icon(dtype):
+    if dtype == "keyboard": return "⌨️"
+    if dtype == "mouse": return "🖱️"
+    if dtype == "audio": return "🎧"
+    return "📶"
 
-    def on_key_release(key):
-        if current_target == ME:
-            return
-        try:
-            k = key.char if hasattr(key, 'char') and key.char else str(key)
-        except:
-            k = str(key)
-        hc.write("_input/keyboard", machine=ME, target=current_target,
-                 action="release", key=k, t=time.time())
 
-    def on_mouse_move(x, y):
-        if current_target == ME:
-            return
-        hc.write("_input/mouse", machine=ME, target=current_target,
-                 action="move", x=x, y=y, t=time.time())
+def device_row(dev, machine_id, is_me):
+    addr = dev.get("address", "?")
+    name = dev.get("name", "Unknown")
+    connected = dev.get("connected", False)
+    dtype = dev.get("type", "other")
 
-    def on_mouse_click(x, y, button, pressed):
-        if current_target == ME:
-            return
-        hc.write("_input/mouse", machine=ME, target=current_target,
-                 action="click", x=x, y=y,
-                 button=str(button), pressed=pressed, t=time.time())
+    dot = "#34d399" if connected else "#555"
+    conn_text = "connected" if connected else "paired"
+    icon = device_icon(dtype)
 
-    def on_mouse_scroll(x, y, dx, dy):
-        if current_target == ME:
-            return
-        hc.write("_input/mouse", machine=ME, target=current_target,
-                 action="scroll", x=x, y=y, dx=dx, dy=dy, t=time.time())
-
-    threading.Thread(target=lambda: keyboard.Listener(
-        on_press=on_key_press, on_release=on_key_release
-    ).start(), daemon=True).start()
-
-    threading.Thread(target=lambda: mouse.Listener(
-        on_move=on_mouse_move, on_click=on_mouse_click, on_scroll=on_mouse_scroll
-    ).start(), daemon=True).start()
-
-# ---------------------------------------------------------------------------
-# Input injection (when we're the target, process events from graph)
-# ---------------------------------------------------------------------------
-KEY_MAP = {}
-if HAS_PYNPUT:
-    # Map string representations back to Key objects
-    for attr in dir(Key):
-        if not attr.startswith('_'):
-            KEY_MAP[f"Key.{attr}"] = getattr(Key, attr)
-
-def inject_keyboard(event):
-    if not HAS_PYNPUT or not kb_ctrl:
-        return
-    k = event.get("key", "")
-    action = event.get("action", "")
-
-    # resolve key
-    resolved = KEY_MAP.get(k)
-    if not resolved:
-        # single char
-        if len(k) == 1:
-            resolved = k
+    if is_me:
+        if connected:
+            buttons = f'<button onclick="window.hfAction(\'disconnect\',\'{machine_id}\',\'{addr}\')" style="padding:4px 10px;background:#1a1a1a;color:#ef4444;border:1px solid #333;border-radius:4px;cursor:pointer;font-size:11px">Disconnect</button>'
         else:
-            return  # unknown key
+            buttons = f'<button onclick="window.hfAction(\'connect\',\'{machine_id}\',\'{addr}\')" style="padding:4px 10px;background:#818cf8;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px">Connect</button>'
+    else:
+        if connected:
+            buttons = f'<button onclick="window.hfAction(\'steal\',\'{machine_id}\',\'{addr}\')" style="padding:4px 10px;background:#f59e0b;color:#000;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600">Steal →</button>'
+        else:
+            buttons = '<span style="font-size:11px;color:#333">—</span>'
 
-    try:
-        if action == "press":
-            kb_ctrl.press(resolved)
-        elif action == "release":
-            kb_ctrl.release(resolved)
-    except Exception as e:
-        print(f"inject kb error: {e}")
+    return DEVICE_HTML_TEMPLATE.format(
+        icon=icon, name=name, addr=addr, dot=dot, conn_text=conn_text, buttons=buttons)
 
-def inject_mouse(event):
-    if not HAS_PYNPUT or not mouse_ctrl:
-        return
-    action = event.get("action", "")
-    try:
-        if action == "move":
-            mouse_ctrl.position = (int(event.get("x", 0)), int(event.get("y", 0)))
-        elif action == "click":
-            btn = Button.left
-            if "right" in str(event.get("button", "")):
-                btn = Button.right
-            elif "middle" in str(event.get("button", "")):
-                btn = Button.middle
-            if event.get("pressed"):
-                mouse_ctrl.press(btn)
-            else:
-                mouse_ctrl.release(btn)
-        elif action == "scroll":
-            mouse_ctrl.scroll(int(event.get("dx", 0)), int(event.get("dy", 0)))
-    except Exception as e:
-        print(f"inject mouse error: {e}")
 
 # ---------------------------------------------------------------------------
-# Mount UI
+# Mount
 # ---------------------------------------------------------------------------
 hc.mount("root/dash", html=DASH_HTML, js=DASH_JS, fixed=True, layer=10)
-hc.write("root/dash", status="scanning...", me=f"{MY_NAME} ({MY_OS})", hint="")
+hc.write("root/dash", status="scanning...", me=f"{MY_NAME} · {MY_OS}", log="starting up...")
 
-# Register this machine
-devices = list_devices()
-machine_info = {
-    "machine_id": ME, "name": MY_NAME, "os": MY_OS,
-    "devices": devices, "t": time.time()
-}
-hc.write(f"_machines/{ME}/info", data=json.dumps(machine_info))
+# Initial scan
+devices = bt.scan()
+hc.write(f"_machines/{ME}/info",
+    machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+    devices=json.dumps(devices), t=time.time())
 
-# Start capture thread
-start_capture()
+print(f"found {len(devices)} BT device(s)")
+for d in devices:
+    c = "✓" if d["connected"] else "·"
+    print(f"  {c} {d['name']} ({d['address']})")
 
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 seen = set()
-last_heartbeat = 0
-last_ui_refresh = 0
+last_hb = 0
+last_ui = 0
+last_scan = time.time()
+log_msg = "ready"
 
 while True:
     now = time.time()
     snap = hc.snapshot() or {}
 
-    # --- heartbeat ---
-    if now - last_heartbeat > 2.0:
-        hc.write(f"_machines/{ME}/presence",
-                 data=json.dumps({"status": "online", "t": now}))
-        last_heartbeat = now
+    # heartbeat
+    if now - last_hb > 2.0:
+        hc.write(f"_machines/{ME}/presence", status="online", t=now)
+        last_hb = now
 
-    # --- process inbox ---
+    # periodic rescan
+    if now - last_scan > 15.0:
+        devices = bt.scan()
+        hc.write(f"_machines/{ME}/info",
+            machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+            devices=json.dumps(devices), t=now)
+        last_scan = now
+
+    # inbox
     for k, v in snap.items():
         if not k.startswith("inbox/") or k in seen:
             continue
@@ -360,112 +390,121 @@ while True:
         try:
             raw = v.get("data", "{}")
             msg = json.loads(raw) if isinstance(raw, str) else raw
-            if msg.get("type") == "set_target":
-                current_target = msg.get("target", ME)
-                print(f"→ target set to: {current_target[:20]}")
-        except Exception:
-            pass
+            action = msg.get("type", "")
+            addr = msg.get("address", "")
+            target_machine = msg.get("machine", "")
+
+            if action == "rescan":
+                devices = bt.scan()
+                hc.write(f"_machines/{ME}/info",
+                    machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+                    devices=json.dumps(devices), t=now)
+                last_scan = now
+                log_msg = f"rescanned — {len(devices)} devices"
+
+            elif action == "connect" and target_machine == ME:
+                ok, msg_text = bt.connect(addr)
+                log_msg = msg_text
+                print(f"connect {addr}: {msg_text}")
+                # rescan after action
+                devices = bt.scan()
+                hc.write(f"_machines/{ME}/info",
+                    machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+                    devices=json.dumps(devices), t=now)
+
+            elif action == "disconnect" and target_machine == ME:
+                ok, msg_text = bt.disconnect(addr)
+                log_msg = msg_text
+                print(f"disconnect {addr}: {msg_text}")
+                devices = bt.scan()
+                hc.write(f"_machines/{ME}/info",
+                    machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+                    devices=json.dumps(devices), t=now)
+
+            elif action == "steal":
+                # "steal" means: disconnect from that machine, connect to ME
+                # We write a disconnect command for the other machine
+                # and a connect command for ourselves
+                log_msg = f"stealing {addr} from {target_machine[:12]}..."
+                print(log_msg)
+
+                # tell the other machine to disconnect
+                hc.write(f"_cmd/{target_machine}", action="disconnect", address=addr, t=now)
+
+                # wait a moment, then connect locally
+                time.sleep(2)
+                ok, msg_text = bt.connect(addr)
+                log_msg = f"steal: {msg_text}"
+                print(log_msg)
+                devices = bt.scan()
+                hc.write(f"_machines/{ME}/info",
+                    machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+                    devices=json.dumps(devices), t=now)
+
+        except Exception as e:
+            log_msg = f"error: {e}"
+            print(f"error: {e}")
         hc.remove(k)
 
-    # --- inject input if we're the target ---
-    kb_event = snap.get("_input/keyboard")
-    if kb_event and kb_event.get("target") == ME and kb_event.get("machine") != ME:
-        inject_keyboard(kb_event)
+    # check for commands directed at us
+    cmd = snap.get(f"_cmd/{ME}")
+    if cmd and cmd.get("action") == "disconnect":
+        addr = cmd.get("address", "")
+        cmd_t = float(cmd.get("t", 0))
+        if now - cmd_t < 10:  # fresh command
+            print(f"command: disconnect {addr}")
+            bt.disconnect(addr)
+            devices = bt.scan()
+            hc.write(f"_machines/{ME}/info",
+                machine_id=ME, name=MY_NAME, os=MY_OS, bt=bt.name(),
+                devices=json.dumps(devices), t=now)
+        hc.remove(f"_cmd/{ME}")
 
-    mouse_event = snap.get("_input/mouse")
-    if mouse_event and mouse_event.get("target") == ME and mouse_event.get("machine") != ME:
-        inject_mouse(mouse_event)
+    # UI refresh
+    if now - last_ui > 1.5:
+        last_ui = now
 
-    # --- refresh UI ---
-    if now - last_ui_refresh > 1.0:
-        last_ui_refresh = now
-
-        # gather all machines
         machines = {}
         for k, v in snap.items():
             if k.startswith("_machines/") and k.endswith("/info"):
-                mid = k.split("/")[1]
-                try:
-                    info = json.loads(v.get("data", "{}")) if isinstance(v.get("data"), str) else v
-                    machines[mid] = info
-                except:
-                    machines[mid] = v
+                machines[k.split("/")[1]] = v
 
-        # check which machines are alive (heartbeat within 10s)
         alive = set()
         for k, v in snap.items():
             if k.startswith("_machines/") and k.endswith("/presence"):
-                mid = k.split("/")[1]
                 try:
-                    pres = json.loads(v.get("data", "{}")) if isinstance(v.get("data"), str) else v
-                    t = float(pres.get("t", 0))
-                    if now - t < 10:
-                        alive.add(mid)
-                except:
-                    pass
+                    if now - float(v.get("t", 0)) < 10: alive.add(k.split("/")[1])
+                except: pass
 
-        print(f"[ui] {len(machines)} machine(s), {len(alive)} alive, {len(snap)} snapshot keys")
+        hc.write("root/dash",
+            status=f"{len(alive)} machine(s) online",
+            log=log_msg)
 
-        # update status
-        n_alive = len(alive)
-        target_name = machines.get(current_target, {}).get("name", current_target[:16])
-        status = f"{n_alive} machine{'s' if n_alive != 1 else ''} · sending to {target_name}"
-        hint_text = "pynput active" if HAS_PYNPUT else "pynput not installed — UI only"
-        hc.write("root/dash", status=status, hint=hint_text)
-
-        # mount/update machine cards
         for mid, info in machines.items():
-            card_path = f"root/dash/{mid[:16]}"
-            m_name = info.get("name", mid[:16]) if isinstance(info.get("name"), str) else mid[:16]
-            m_os = info.get("os", "?") if isinstance(info.get("os"), str) else "?"
-            is_alive = mid in alive
-            is_target = mid == current_target
+            is_me = mid == ME
+            mn = info.get("name", mid[:16])
+            if not isinstance(mn, str): mn = str(mn)[:16]
+            mo = info.get("os", "?")
+            if not isinstance(mo, str): mo = "?"
+            mbt = info.get("bt", "?")
+            if not isinstance(mbt, str): mbt = "?"
 
-            # device list HTML
             try:
-                devs = info.get("devices", [])
-                if isinstance(devs, str):
-                    devs = json.loads(devs)
-            except:
-                devs = []
-            dev_html = ""
-            for d in devs:
-                icon = "⌨️" if d.get("type") == "keyboard" else "🖱️" if d.get("type") == "mouse" else "📶"
-                dev_html += f'<div>{icon} {d.get("name", "?")}</div>'
-            if not dev_html:
-                dev_html = '<div style="color:#444">no devices reported</div>'
+                mdevs = json.loads(info["devices"]) if isinstance(info.get("devices"), str) else []
+            except: mdevs = []
 
-            # role badge
-            if is_target and mid == ME:
-                badge = "⬤ LOCAL"
-                badge_color = "#818cf8"
-            elif is_target:
-                badge = "⬤ TARGET"
-                badge_color = "#34d399"
-            else:
-                badge = "○ IDLE"
-                badge_color = "#555"
+            mpath = f"root/dash/m_{mid[:12]}"
+            icon = "💻" if mo == "Darwin" else "🖥️" if mo == "Windows" else "🖥️"
+            badge = "THIS MACHINE" if is_me else ("online" if mid in alive else "offline")
 
-            border = "#818cf8" if is_target and mid == ME else "#34d399" if is_target else "#252525"
-            if not is_alive:
-                border = "#3f1515"
-                badge = "✕ OFFLINE"
-                badge_color = "#ef4444"
+            hc.mount(mpath, html=MACHINE_HTML, layer=5)
+            hc.write(mpath, icon=icon, mname=mn, msub=f"{mo} · {mbt}",
+                mbadge=badge)
 
-            # onclick to select
-            onclick_js = f"window.hfSelectTarget('{mid}')"
-            card_html = MACHINE_CARD_HTML.replace(
-                'style="flex:1;',
-                f'onclick="{onclick_js}" style="flex:1;'
-            )
+            # mount device rows
+            for i, dev in enumerate(mdevs):
+                dpath = f"{mpath}/d_{i}"
+                row_html = device_row(dev, mid, is_me)
+                hc.mount(dpath, html=row_html, layer=5)
 
-            hc.mount(card_path, html=card_html, layer=5)
-            hc.write(card_path,
-                machine_name=m_name,
-                machine_os=m_os,
-                role_badge=badge,
-                device_list=dev_html,
-                border_color=border,
-                latency=f"{'online' if is_alive else 'offline'} · {m_os}")
-
-    time.sleep(0.05)
+    time.sleep(0.1)
