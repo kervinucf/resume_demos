@@ -4,19 +4,13 @@ Chat — two machines, same WiFi, zero config.
 
     pip install zeroconf
 
-    # Machine A — just run it
+    # Machine A
     python -m examples.chat --discovery lan
 
-    # Machine B — just run it (finds A via mDNS, or becomes host if A isn't up yet)
+    # Machine B
     python -m examples.chat --discovery lan
 
-That's it. No IPs, no peer lists, no coordination.
-
-Other modes still work:
-    python -m examples.chat                                          # local only
-    python -m examples.chat --discovery lan --relay host             # force host
-    python -m examples.chat --discovery lan --relay join             # join only
-    python -m examples.chat --discovery trusted --peers 10.0.0.5    # explicit
+    Open the URL it prints. That's it.
 """
 
 import argparse
@@ -24,23 +18,14 @@ import json
 import time
 from HyperCoreSDK.client import HyperClient
 
-# ------------------------------------------------------------------
-# Args
-# ------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="HyperChat")
-parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"],
-                    help="who can talk: local | lan | trusted")
-parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"],
-                    help="your role: auto | host | join")
-parser.add_argument("--peers", nargs="*", default=[],
-                    help="peer addresses for trusted mode (e.g. 10.0.0.5)")
+parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
+parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
+parser.add_argument("--peers", nargs="*", default=[])
 parser.add_argument("--port", type=int, default=8765)
 parser.add_argument("--root", default="chat")
 args = parser.parse_args()
 
-# ------------------------------------------------------------------
-# Connect — one call
-# ------------------------------------------------------------------
 hc = HyperClient(
     root=args.root,
     discovery=args.discovery,
@@ -95,40 +80,24 @@ CHAT_JS = r"""
 })();
 """
 
-# ------------------------------------------------------------------
-# Mount
-# ------------------------------------------------------------------
 role = "hosting" if hc.is_hosting else "joined"
-label = f"{hc.discovery} · {role} · {hc.machine_id[:16]}"
-
 hc.mount("root/chat", html=CHAT_HTML, js=CHAT_JS, fixed=True, layer=10)
-hc.write("root/chat", title="general", mode=label)
+hc.write("root/chat", title="general", mode=f"{hc.discovery} · {role} · {hc.machine_id[:16]}")
 
-# ------------------------------------------------------------------
-# Event loop
-# ------------------------------------------------------------------
 seen = set()
-
 while True:
     for k, v in (hc.snapshot() or {}).items():
         if not k.startswith("inbox/") or k in seen:
             continue
-
         seen.add(k)
-
         try:
             raw = v.get("data", "{}")
             msg = json.loads(raw) if isinstance(raw, str) else raw
         except Exception:
             continue
-
         out = "root/chat/" + k.split("/", 1)[1]
         hc.mount(out, html=MSG_HTML)
-        hc.write(out,
-                 user=msg.get("user", "guest"),
-                 text=msg.get("text", ""),
-                 machine=hc.machine_id[:16])
-
+        hc.write(out, user=msg.get("user", "guest"),
+                 text=msg.get("text", ""), machine=hc.machine_id[:16])
         hc.remove(k)
-
     time.sleep(0.1)
