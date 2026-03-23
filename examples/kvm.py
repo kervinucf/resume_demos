@@ -1,261 +1,249 @@
 #!/usr/bin/env python3
 """
-HyperFlow KVM — hot-swap Bluetooth devices between machines.
-
-No input interception. No accessibility permissions. No pynput.
-Just tells the Bluetooth adapter to connect or disconnect devices.
+HyperFlow KVM — switch a Bluetooth keyboard/mouse between two machines.
 
     pip install zeroconf
-    Mac:  brew install blueutil
-    Win:  (built-in PowerShell)
+    Mac:     brew install blueutil
+    Windows: run terminal as Administrator (needed for BT control)
 
-    # Machine A (Mac)
-    python -m examples.kvm --discovery lan
+    python -m examples.kvm --discovery lan     # both machines
 
-    # Machine B (Windows)
-    python -m examples.kvm --discovery lan
+How it works:
+    Your G915 (or any multi-host BT device) is paired to both machines.
+    Click "→ Use here" to grab a device to your machine.
+    Click "Release" to let it go back to the other.
 
-    Open http://localhost:8765/kvm on either machine.
-    See every BT device on every machine.
-    Click "Steal" to yank a device to your machine.
+    Mac:     blueutil --connect / --disconnect (no admin needed)
+    Windows: Enable/Disable-PnpDevice (needs Run as Administrator)
+
+    When Mac connects, the device auto-disconnects from Windows.
+    When Mac releases, Windows can re-grab it (or it auto-reconnects).
 """
 
 import argparse
 import json
 import platform
 import subprocess
+import sys
 import time
 import traceback
 
 from HyperCoreSDK.client import HyperClient
 
-MY_OS = platform.system()  # "Darwin" or "Windows"
+MY_OS = platform.system()
 
 
 # ============================================================
-# Bluetooth backends
+# BT Backends
 # ============================================================
 
 def guess_type(name):
     n = name.lower()
-    for kw in ("keyboard", "keychron", "k380", "k860", "g915", "mx keys", "hhkb"):
+    for kw in ("keyboard", "keychron", "k380", "g915", "mx keys", "hhkb"):
         if kw in n: return "keyboard"
-    for kw in ("mouse", "trackpad", "mx master", "g502", "g pro", "m720", "ergo"):
+    for kw in ("mouse", "trackpad", "mx master", "g502", "logitech m"):
         if kw in n: return "mouse"
     for kw in ("airpod", "headphone", "buds", "speaker", "jabra", "sony wh", "beats"):
         if kw in n: return "audio"
-    for kw in ("xbox", "controller", "gamepad", "dualsense", "joycon"):
+    for kw in ("xbox", "controller", "gamepad", "dualsense"):
         if kw in n: return "gamepad"
-    for kw in ("iphone", "ipad", "galaxy", "pixel"):
+    for kw in ("iphone", "ipad", "galaxy"):
         if kw in n: return "phone"
     return "other"
 
-
-def dev_icon(t):
-    return {"keyboard": "⌨️", "mouse": "🖱️", "audio": "🎧",
-            "gamepad": "🎮", "phone": "📱"}.get(t, "📶")
+ICONS = {"keyboard": "⌨️", "mouse": "🖱️", "audio": "🎧",
+         "gamepad": "🎮", "phone": "📱"}
+def icon_for(t): return ICONS.get(t, "📶")
 
 
 class BT:
-    """Base — no BT support."""
-    def scan(self):       return []
-    def connect(self, a): return False, "no bluetooth backend"
-    def disconnect(self, a): return False, "no bluetooth backend"
-    def label(self):      return "none"
+    def scan(self): return []
+    def connect(self, a): return False, "no bt backend"
+    def disconnect(self, a): return False, "no bt backend"
+    def name(self): return "none"
+    def is_admin(self): return True
 
 
 class MacBT(BT):
-    """blueutil — brew install blueutil"""
+    def name(self): return "blueutil"
+    def is_admin(self): return True  # blueutil doesn't need admin
 
-    def label(self): return "blueutil"
-
-    def _blu(self, *args):
+    def _cmd(self, *a):
         try:
             out = subprocess.check_output(
-                ["blueutil"] + list(args), timeout=10, text=True,
+                ["blueutil"] + list(a), timeout=10, text=True,
                 stderr=subprocess.STDOUT)
             return True, out.strip()
         except FileNotFoundError:
-            return False, "blueutil not found — run: brew install blueutil"
+            return False, "blueutil not found — brew install blueutil"
         except subprocess.CalledProcessError as e:
-            return False, e.output.strip() if e.output else str(e)
+            return False, (e.output or str(e)).strip()
         except Exception as e:
             return False, str(e)
 
     def scan(self):
-        ok, out = self._blu("--paired", "--format", "json")
-        if not ok:
-            print(f"  blueutil scan failed: {out}")
-            return []
-        try:
-            raw = json.loads(out)
-        except json.JSONDecodeError:
-            return []
-        return [{
-            "address": d.get("address", ""),
-            "name":    d.get("name", "Unknown"),
-            "connected": bool(d.get("connected")),
-            "type":    guess_type(d.get("name", "")),
-        } for d in raw if d.get("address")]
+        ok, out = self._cmd("--paired", "--format", "json")
+        if not ok: return []
+        try: raw = json.loads(out)
+        except: return []
+        return [{"address": d.get("address",""), "name": d.get("name","?"),
+                 "connected": bool(d.get("connected")),
+                 "type": guess_type(d.get("name",""))}
+                for d in raw if d.get("address")]
 
     def connect(self, addr):
-        ok, out = self._blu("--connect", addr)
-        if ok:
-            time.sleep(1.5)  # give BT a moment
-            return True, f"connected {addr}"
-        return False, out
+        ok, out = self._cmd("--connect", addr)
+        time.sleep(1)
+        return (True, f"connected {addr}") if ok else (False, out)
 
     def disconnect(self, addr):
-        ok, out = self._blu("--disconnect", addr)
-        return (True, f"disconnected {addr}") if ok else (False, out)
+        ok, out = self._cmd("--disconnect", addr)
+        return (True, f"released {addr}") if ok else (False, out)
 
 
 class WinBT(BT):
-    """PowerShell — built-in on Windows."""
+    def name(self): return "powershell"
 
-    def label(self): return "powershell"
+    def is_admin(self):
+        """Check if running as Administrator."""
+        try:
+            import ctypes
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except: return False
 
-    # BLE service names that are NOT real devices
     JUNK = frozenset({
         "generic attribute profile", "generic access profile",
         "device information service", "service discovery service",
         "bluetooth le generic attribute service",
         "bluetooth device (rfcomm protocol tdi)",
-        "microsoft bluetooth le enumerator",
-        "microsoft bluetooth enumerator",
     })
 
     def scan(self):
-        try:
-            ps = (
-                'Get-PnpDevice -Class Bluetooth,BTHLE -Status OK '
-                '-ErrorAction SilentlyContinue | '
-                'Select-Object FriendlyName,InstanceId,Status | '
-                'ConvertTo-Json -Compress'
-            )
-            out = subprocess.check_output(
-                ["powershell", "-NoProfile", "-Command", ps],
-                timeout=15, text=True, stderr=subprocess.DEVNULL)
-            raw = json.loads(out)
-            if isinstance(raw, dict): raw = [raw]
-        except Exception as e:
-            print(f"  powershell scan failed: {e}")
-            return []
+        raw = []
+        # Query each BT class separately — comma syntax fails on some PS versions
+        for cls in ("Bluetooth", "BTHLE"):
+            try:
+                ps = (
+                    f'Get-PnpDevice -Class {cls} -ErrorAction SilentlyContinue | '
+                    f'Select-Object FriendlyName,InstanceId,Status | ConvertTo-Json -Compress')
+                out = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command", ps],
+                    timeout=15, text=True, stderr=subprocess.DEVNULL)
+                if not out.strip():
+                    continue
+                parsed = json.loads(out)
+                if isinstance(parsed, dict): parsed = [parsed]
+                raw.extend(parsed)
+            except Exception:
+                pass
+
+        if not raw:
+            # last resort — get everything and filter by InstanceId prefix
+            try:
+                ps = (
+                    'Get-PnpDevice -ErrorAction SilentlyContinue | '
+                    'Where-Object { $_.InstanceId -like "BTH*" -or $_.InstanceId -like "BTHLE*" } | '
+                    'Select-Object FriendlyName,InstanceId,Status | ConvertTo-Json -Compress')
+                out = subprocess.check_output(
+                    ["powershell", "-NoProfile", "-Command", ps],
+                    timeout=15, text=True, stderr=subprocess.DEVNULL)
+                if out.strip():
+                    parsed = json.loads(out)
+                    if isinstance(parsed, dict): parsed = [parsed]
+                    raw = parsed
+            except Exception as e:
+                print(f"  scan fallback error: {e}")
+                return []
 
         seen = {}
         for d in raw:
             name = (d.get("FriendlyName") or "").strip()
-            iid  = (d.get("InstanceId") or "")
+            iid = (d.get("InstanceId") or "")
+            status = (d.get("Status") or "")
 
-            # skip junk
-            if name.lower() in self.JUNK:
-                continue
-            if any(j in name.lower() for j in ("radio", "enumerator")):
-                continue
-            # skip GATT service entries (they have a UUID in the instance ID)
-            if "bthledevice" in iid.lower():
-                continue
-            if not name:
-                continue
+            if name.lower() in self.JUNK: continue
+            if any(j in name.lower() for j in ("radio","enumerator")): continue
+            if "bthledevice" in iid.lower(): continue
+            if not name: continue
 
-            addr = self._addr_from_iid(iid)
-            if not addr:
-                continue
+            addr = self._addr(iid)
+            if not addr: continue
 
-            # dedupe by address — keep shortest/cleanest name
             if addr in seen:
-                if len(name) < len(seen[addr]["name"]):
-                    seen[addr]["name"] = name
+                if len(name) < len(seen[addr]["name"]): seen[addr]["name"] = name
                 continue
 
             seen[addr] = {
-                "address":   addr,
-                "name":      name,
-                "connected": True,  # Status=OK means it's active
-                "type":      guess_type(name),
-                "iid":       iid,
+                "address": addr, "name": name,
+                "connected": status == "OK",
+                "type": guess_type(name),
             }
-
         return list(seen.values())
 
     def connect(self, addr):
-        return self._set_device(addr, enable=True)
+        return self._toggle(addr, True)
 
     def disconnect(self, addr):
-        return self._set_device(addr, enable=False)
+        return self._toggle(addr, False)
 
-    def _set_device(self, addr, enable=True):
+    def _toggle(self, addr, enable):
         verb = "Enable" if enable else "Disable"
-        clean = addr.replace(":", "").replace("-", "").upper()
+        clean = addr.replace(":","").replace("-","").upper()
         ps = (
-            f'$devs = Get-PnpDevice | Where-Object {{ '
-            f'$_.InstanceId -like "*{clean}*" }}; '
-            f'foreach ($d in $devs) {{ '
-            f'{verb}-PnpDevice -InstanceId $d.InstanceId -Confirm:$false '
-            f'-ErrorAction SilentlyContinue }}'
+            f'$devs = Get-PnpDevice | Where-Object {{ $_.InstanceId -like "*{clean}*" }}; '
+            f'foreach ($d in $devs) {{ {verb}-PnpDevice -InstanceId $d.InstanceId -Confirm:$false }}'
         )
         try:
             subprocess.check_output(
                 ["powershell", "-NoProfile", "-Command", ps],
-                timeout=15, text=True, stderr=subprocess.DEVNULL)
+                timeout=15, text=True, stderr=subprocess.STDOUT)
             return True, f"{verb.lower()}d {addr}"
+        except subprocess.CalledProcessError as e:
+            msg = (e.output or str(e)).strip()
+            if "Access" in msg or "denied" in msg.lower() or "admin" in msg.lower():
+                return False, "needs Administrator — right-click terminal → Run as Administrator"
+            return False, msg
         except Exception as e:
             return False, str(e)
 
-    def _addr_from_iid(self, iid):
-        """Extract a BT MAC address from a PnP InstanceId string."""
-        # Examples:
-        #   BTHLE\DEV_E34BCEC43832\...    → E3:4B:CE:C4:38:32
-        #   BTHENUM\DEV_08FF44207BE0\...  → 08:FF:44:20:7B:E0
-        for part in iid.replace("\\", "/").split("/"):
-            # DEV_XXXXXXXXXXXX pattern
+    def _addr(self, iid):
+        for part in iid.replace("\\","/").split("/"):
             if part.upper().startswith("DEV_"):
-                hex_part = part[4:].replace("-", "")
-                if len(hex_part) >= 12 and all(c in "0123456789abcdefABCDEF" for c in hex_part[:12]):
-                    h = hex_part[:12].upper()
-                    return ":".join(h[i:i+2] for i in range(0, 12, 2))
-            # raw 12-hex-digit part
-            clean = part.replace("-", "").replace(":", "")
+                h = part[4:].replace("-","")[:12]
+                if len(h) == 12 and all(c in "0123456789abcdefABCDEF" for c in h):
+                    return ":".join(h[i:i+2] for i in range(0,12,2)).upper()
+            clean = part.replace("-","").replace(":","")
             if len(clean) == 12 and all(c in "0123456789abcdefABCDEF" for c in clean):
-                h = clean.upper()
-                return ":".join(h[i:i+2] for i in range(0, 12, 2))
+                return ":".join(clean[i:i+2] for i in range(0,12,2)).upper()
         return ""
 
 
 def make_bt():
     if MY_OS == "Darwin":
         b = MacBT()
-        ok, _ = b._blu("--version")
-        if ok:
-            print(f"bluetooth backend: blueutil (macOS)")
-            return b
-        print("blueutil not found — run: brew install blueutil")
-
+        ok, _ = b._cmd("--version")
+        if ok: print("bluetooth: blueutil"); return b
+        print("blueutil not found — brew install blueutil")
     if MY_OS == "Windows":
-        print(f"bluetooth backend: powershell (Windows)")
-        return WinBT()
-
-    print("no bluetooth backend available")
+        b = WinBT()
+        if not b.is_admin():
+            print("⚠️  NOT RUNNING AS ADMINISTRATOR")
+            print("   Right-click your terminal → Run as Administrator")
+            print("   BT disconnect/connect will fail without admin rights.\n")
+        else:
+            print("bluetooth: powershell (admin ✓)")
+        return b
     return BT()
 
 
 # ============================================================
-# Hyper graph helpers
+# Graph helpers
 # ============================================================
-# The relay only keeps snapshot entries with CONTENT_FIELDS:
-#   html, css, js, data, meta, links, actions, layer, fixed, portal, ...
-# Arbitrary fields like name=, os= get silently dropped.
-# So ALL machine data must go through data=json.dumps({...}).
 
-def pack(obj):
-    """Wrap a dict in the data field for the relay."""
-    return json.dumps(obj)
-
-def unpack(snap_val):
-    """Read a data-field entry back out."""
-    if not isinstance(snap_val, dict):
-        return {}
-    raw = snap_val.get("data", "{}")
+def pack(o):   return json.dumps(o)
+def unpack(v):
+    if not isinstance(v, dict): return {}
+    raw = v.get("data", "{}")
     if isinstance(raw, str):
         try: return json.loads(raw)
         except: return {}
@@ -263,101 +251,103 @@ def unpack(snap_val):
 
 
 # ============================================================
-# UI templates
+# UI
 # ============================================================
 
-DASH_HTML = """
-<div style="width:100%;height:100%;background:#09090b;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;flex-direction:column">
-  <div style="padding:20px 24px;background:#18181b;border-bottom:1px solid #27272a;display:flex;justify-content:space-between;align-items:center">
-    <div style="display:flex;align-items:center;gap:14px">
-      <div style="font-size:24px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#818cf8,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent">HYPERFLOW</div>
-      <div style="font-size:12px;color:#71717a;background:#27272a;padding:5px 12px;border-radius:6px" data-bind-text="status">starting...</div>
+SHELL = """
+<div style="width:100%;height:100%;background:#09090b;color:#fafafa;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;display:flex;flex-direction:column">
+  <div style="padding:20px 28px;background:#18181b;border-bottom:1px solid #27272a;display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="font-size:26px;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent">KVM</div>
+      <div style="font-size:13px;color:#52525b;background:#27272a;padding:5px 14px;border-radius:8px" data-bind-text="status">starting...</div>
     </div>
     <div style="display:flex;gap:10px;align-items:center">
-      <button id="btn_scan" style="padding:7px 16px;background:#27272a;color:#a78bfa;border:1px solid #3f3f46;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">↻ Rescan All</button>
-      <div style="font-size:11px;color:#52525b" data-bind-text="me"></div>
+      <button id="btn_scan" style="padding:8px 18px;background:#27272a;color:#a78bfa;border:1px solid #3f3f46;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">↻ Rescan</button>
+      <span style="font-size:11px;color:#3f3f46" data-bind-text="me"></span>
     </div>
   </div>
-  <div style="flex:1;overflow:auto;padding:24px">
-    <div data-children style="display:flex;flex-direction:column;gap:20px"></div>
+  <div style="flex:1;overflow:auto;padding:28px">
+    <div data-children style="display:flex;flex-direction:column;gap:24px"></div>
   </div>
-  <div style="padding:14px 24px;background:#18181b;border-top:1px solid #27272a;display:flex;justify-content:space-between;align-items:center">
-    <div style="font-size:12px;color:#52525b" data-bind-text="log">ready</div>
-    <div style="font-size:11px;color:#3f3f46" data-bind-text="ts"></div>
+  <div style="padding:14px 28px;background:#18181b;border-top:1px solid #27272a;display:flex;justify-content:space-between">
+    <span style="font-size:12px;color:#52525b" data-bind-text="log">ready</span>
+    <span style="font-size:11px;color:#3f3f46" data-bind-text="ts"></span>
   </div>
 </div>
 """
 
-DASH_JS = r"""
+SHELL_JS = r"""
 (function(){
-  if(document.getElementById("_hf"))return;
-  var m=document.createElement("div");m.id="_hf";m.style.display="none";document.body.appendChild(m);
-  window.hf=function(action,machine,addr){
+  if(document.getElementById("_k"))return;
+  var m=document.createElement("div");m.id="_k";m.style.display="none";document.body.appendChild(m);
+  window.kvm=function(act,mid,addr){
     window.$scene.get("inbox/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)).put({
-      data:JSON.stringify({type:action,machine:machine,address:addr})
+      data:JSON.stringify({type:act,machine:mid,address:addr})
     });
   };
   var b=document.getElementById("btn_scan");
-  if(b&&!b.dataset.on){b.dataset.on=1;b.onclick=function(){window.hf("rescan","","");};}
+  if(b&&!b.dataset.on){b.dataset.on=1;b.onclick=function(){window.kvm("rescan","","");};}
 })();
 """
 
-MACHINE_HTML = """
-<div style="background:#18181b;border:1px solid #27272a;border-radius:12px;overflow:hidden">
-  <div style="padding:16px 20px;background:#1c1c1f;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #27272a">
-    <div style="display:flex;align-items:center;gap:12px">
-      <div data-bind-text="icon" style="font-size:22px"></div>
+MCARD = """
+<div style="background:#18181b;border:1px solid #27272a;border-radius:14px;overflow:hidden">
+  <div style="padding:18px 22px;background:#1c1c1f;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #27272a">
+    <div style="display:flex;align-items:center;gap:14px">
+      <span data-bind-text="ic" style="font-size:24px"></span>
       <div>
-        <div data-bind-text="mname" style="font-weight:700;font-size:16px"></div>
-        <div data-bind-text="msub" style="font-size:11px;color:#52525b;margin-top:2px"></div>
+        <div data-bind-text="nm" style="font-weight:700;font-size:17px"></div>
+        <div data-bind-text="sub" style="font-size:12px;color:#52525b;margin-top:2px"></div>
       </div>
     </div>
-    <div data-bind-text="badge" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;background:#27272a;color:#a78bfa"></div>
+    <div data-bind-text="bg" style="font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;background:#27272a"></div>
   </div>
   <div data-children style="display:flex;flex-direction:column"></div>
 </div>
 """
 
 
-def device_row(dev, machine_id, is_me):
-    addr = dev.get("address", "?")
-    name = dev.get("name", "Unknown")
+def dev_row(dev, mid, is_me):
+    addr = dev.get("address","?")
+    name = dev.get("name","?")
     conn = dev.get("connected", False)
-    icon = dev_icon(dev.get("type", "other"))
+    ic   = icon_for(dev.get("type","other"))
     dot  = "#4ade80" if conn else "#52525b"
-    txt  = "connected" if conn else "paired"
+    st   = "connected" if conn else "paired"
 
-    # buttons depend on context
     if is_me and conn:
-        btn = (f'<button onclick="window.hf(\'disconnect\',\'{machine_id}\',\'{addr}\')" '
-               f'style="padding:5px 12px;background:transparent;color:#f87171;border:1px solid #7f1d1d;'
-               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">Disconnect</button>')
+        btn = (f'<button onclick="window.kvm(\'release\',\'{mid}\',\'{addr}\')" '
+               f'style="padding:6px 14px;background:transparent;color:#f87171;'
+               f'border:1px solid #7f1d1d;border-radius:6px;cursor:pointer;'
+               f'font-size:12px;font-weight:600">Release</button>')
     elif is_me and not conn:
-        btn = (f'<button onclick="window.hf(\'connect\',\'{machine_id}\',\'{addr}\')" '
-               f'style="padding:5px 12px;background:#6d28d9;color:#fff;border:none;'
-               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:600">Connect</button>')
+        btn = (f'<button onclick="window.kvm(\'grab\',\'{mid}\',\'{addr}\')" '
+               f'style="padding:6px 14px;background:#6d28d9;color:#fff;border:none;'
+               f'border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">'
+               f'→ Use here</button>')
     elif not is_me and conn:
-        btn = (f'<button onclick="window.hf(\'steal\',\'{machine_id}\',\'{addr}\')" '
-               f'style="padding:5px 12px;background:#d97706;color:#000;border:none;'
-               f'border-radius:5px;cursor:pointer;font-size:11px;font-weight:700">⚡ Steal</button>')
+        btn = (f'<button onclick="window.kvm(\'steal\',\'{mid}\',\'{addr}\')" '
+               f'style="padding:6px 14px;background:#d97706;color:#000;border:none;'
+               f'border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">'
+               f'⚡ Grab to me</button>')
     else:
         btn = ''
 
-    return f'''<div style="padding:12px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1c1c1f">
-  <div style="display:flex;align-items:center;gap:12px">
-    <span style="font-size:18px">{icon}</span>
-    <div>
-      <div style="font-size:13px;font-weight:500;color:#e4e4e7">{name}</div>
-      <div style="font-size:10px;color:#52525b;font-family:monospace">{addr}</div>
-    </div>
+    return f'''<div style="padding:14px 22px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1c1c1f">
+<div style="display:flex;align-items:center;gap:14px">
+  <span style="font-size:20px">{ic}</span>
+  <div>
+    <div style="font-size:14px;font-weight:500">{name}</div>
+    <div style="font-size:10px;color:#52525b;font-family:monospace">{addr}</div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px">
-    <div style="display:flex;align-items:center;gap:5px">
-      <div style="width:7px;height:7px;border-radius:50%;background:{dot}"></div>
-      <span style="font-size:11px;color:{dot}">{txt}</span>
-    </div>
-    {btn}
+</div>
+<div style="display:flex;align-items:center;gap:12px">
+  <div style="display:flex;align-items:center;gap:6px">
+    <div style="width:8px;height:8px;border-radius:50%;background:{dot}"></div>
+    <span style="font-size:11px;color:{dot}">{st}</span>
   </div>
+  {btn}
+</div>
 </div>'''
 
 
@@ -365,216 +355,178 @@ def device_row(dev, machine_id, is_me):
 # Main
 # ============================================================
 
-parser = argparse.ArgumentParser(description="HyperFlow KVM")
-parser.add_argument("--discovery", default="local", choices=["local", "lan", "trusted"])
-parser.add_argument("--relay", default="auto", choices=["auto", "host", "join"])
+parser = argparse.ArgumentParser(description="KVM — BT device switcher")
+parser.add_argument("--discovery", default="local", choices=["local","lan","trusted"])
+parser.add_argument("--relay", default="auto", choices=["auto","host","join"])
 parser.add_argument("--peers", nargs="*", default=[])
 parser.add_argument("--port", type=int, default=8765)
 parser.add_argument("--root", default="kvm")
-args = parser.parse_args()
+a = parser.parse_args()
 
-hc = HyperClient(
-    root=args.root, discovery=args.discovery, relay=args.relay,
-    peers=[f"http://{p}:{args.port}" for p in args.peers], port=args.port)
+hc = HyperClient(root=a.root, discovery=a.discovery, relay=a.relay,
+    peers=[f"http://{p}:{a.port}" for p in a.peers], port=a.port)
 hc.connect()
 hc.clear()
 
-ME      = hc.machine_id
-MY_NAME = hc.machine_name
-bt      = make_bt()
+ME   = hc.machine_id
+NAME = hc.machine_name
+bt   = make_bt()
 
-# ── helpers ──
+def publish(devs):
+    hc.write(f"_m/{ME}/i", data=pack({"id":ME,"name":NAME,"os":MY_OS,
+        "bt":bt.name(),"admin":bt.is_admin(),"devices":devs,"t":time.time()}))
 
-def publish_devices(devs):
-    """Write this machine's info + device list to the graph."""
-    hc.write(f"_m/{ME}/info", data=pack({
-        "id": ME, "name": MY_NAME, "os": MY_OS,
-        "bt": bt.label(), "devices": devs, "t": time.time(),
-    }))
+def heartbeat():
+    hc.write(f"_m/{ME}/h", data=pack({"t":time.time()}))
 
-def publish_heartbeat():
-    hc.write(f"_m/{ME}/hb", data=pack({"t": time.time()}))
-
-def read_machines(snap):
-    """Return {machine_id: info_dict} from snapshot."""
-    machines = {}
-    for k, v in snap.items():
-        if k.startswith("_m/") and k.endswith("/info"):
-            mid = k.split("/")[1]
-            machines[mid] = unpack(v)
-    return machines
-
-def read_alive(snap, now):
-    """Return set of machine IDs with recent heartbeats."""
-    alive = set()
-    for k, v in snap.items():
-        if k.startswith("_m/") and k.endswith("/hb"):
-            mid = k.split("/")[1]
-            hb = unpack(v)
+def machines_from(snap, now):
+    ms, alive = {}, set()
+    for k,v in snap.items():
+        if k.startswith("_m/") and k.endswith("/i"):
+            ms[k.split("/")[1]] = unpack(v)
+        elif k.startswith("_m/") and k.endswith("/h"):
+            p = unpack(v)
             try:
-                if now - float(hb.get("t", 0)) < 10:
-                    alive.add(mid)
+                if now - float(p.get("t",0)) < 12: alive.add(k.split("/")[1])
             except: pass
-    return alive
+    return ms, alive
 
+# ── init ──
 
-# ── initial setup ──
+hc.mount("root/d", html=SHELL, js=SHELL_JS, fixed=True, layer=10)
+hc.write("root/d", status="scanning...", me=f"{NAME} · {MY_OS}", log="starting...", ts="")
 
-hc.mount("root/dash", html=DASH_HTML, js=DASH_JS, fixed=True, layer=10)
-hc.write("root/dash", status="scanning bluetooth...", me=f"{MY_NAME} · {MY_OS}", log="starting...", ts="")
+print("\nscanning bluetooth...")
+devs = bt.scan()
+publish(devs); heartbeat(); time.sleep(0.5)
 
-print(f"\nscanning bluetooth...")
-devices = bt.scan()
-publish_devices(devices)
-publish_heartbeat()
-time.sleep(0.5)  # let the relay process
-
-print(f"found {len(devices)} device(s):")
-for d in devices:
-    c = "●" if d.get("connected") else "○"
-    print(f"  {c} {d['name']}  {d['address']}")
+print(f"found {len(devs)} device(s):")
+for d in devs:
+    s = "●" if d.get("connected") else "○"
+    print(f"  {s} {d['name']}  {d['address']}")
+if MY_OS == "Windows" and not bt.is_admin():
+    print("\n⚠️  Run as Administrator for BT control to work!\n")
 print()
 
+# ── loop ──
 
-# ── main loop ──
-
-seen    = set()
+seen = set()
 last_hb = time.time()
 last_ui = 0
 last_sc = time.time()
-logmsg  = "ready"
+log_msg = "ready"
 
 while True:
     try:
-        now  = time.time()
+        now = time.time()
         snap = hc.snapshot() or {}
 
-        # heartbeat
-        if now - last_hb > 3:
-            publish_heartbeat()
-            last_hb = now
-
-        # auto-rescan every 20s
-        if now - last_sc > 20:
-            devices = bt.scan()
-            publish_devices(devices)
-            last_sc = now
+        if now - last_hb > 3: heartbeat(); last_hb = now
+        if now - last_sc > 20: devs = bt.scan(); publish(devs); last_sc = now
 
         # ── inbox ──
-        for k, v in list(snap.items()):
-            if not k.startswith("inbox/") or k in seen:
-                continue
+        for k,v in list(snap.items()):
+            if not k.startswith("inbox/") or k in seen: continue
             seen.add(k)
-
             try:
                 msg = unpack(v)
-                act = msg.get("type", "")
-                addr = msg.get("address", "")
-                mid  = msg.get("machine", "")
+                act  = msg.get("type","")
+                addr = msg.get("address","")
+                mid  = msg.get("machine","")
 
                 if act == "rescan":
-                    print("rescan requested")
-                    devices = bt.scan()
-                    publish_devices(devices)
-                    last_sc = now
-                    logmsg = f"rescanned — {len(devices)} devices"
+                    print("rescan")
+                    devs = bt.scan(); publish(devs); last_sc = now
+                    log_msg = f"rescanned — {len(devs)} devices"
 
-                elif act == "connect" and mid == ME:
-                    print(f"connect {addr}")
+                elif act == "grab" and mid == ME:
+                    # connect a device to this machine
+                    print(f"grab {addr}")
                     ok, txt = bt.connect(addr)
-                    logmsg = txt; print(f"  → {txt}")
-                    devices = bt.scan(); publish_devices(devices)
+                    log_msg = txt; print(f"  → {txt}")
+                    devs = bt.scan(); publish(devs)
 
-                elif act == "disconnect" and mid == ME:
-                    print(f"disconnect {addr}")
+                elif act == "release" and mid == ME:
+                    # disconnect a device from this machine
+                    print(f"release {addr}")
                     ok, txt = bt.disconnect(addr)
-                    logmsg = txt; print(f"  → {txt}")
-                    devices = bt.scan(); publish_devices(devices)
+                    log_msg = txt; print(f"  → {txt}")
+                    devs = bt.scan(); publish(devs)
 
                 elif act == "steal":
-                    # steal = tell other machine to disconnect, then connect here
+                    # steal = tell other machine to release, then grab here
                     print(f"steal {addr} from {mid[:16]}")
-                    logmsg = f"stealing {addr}..."
+                    log_msg = f"grabbing {addr}..."
 
-                    # ask other machine to disconnect
-                    hc.write(f"_cmd/{mid}", data=pack({
-                        "action": "disconnect", "address": addr, "t": now}))
+                    # ask other machine to release
+                    hc.write(f"_cmd/{mid}", data=pack(
+                        {"action":"release","address":addr,"t":now}))
 
-                    # wait for BT to release
+                    # wait for BT handoff
                     time.sleep(2.5)
 
-                    # connect locally
+                    # grab locally
                     ok, txt = bt.connect(addr)
-                    logmsg = f"steal → {txt}"
-                    print(f"  → {txt}")
-                    devices = bt.scan(); publish_devices(devices)
+                    log_msg = f"grab → {txt}"; print(f"  → {txt}")
+                    devs = bt.scan(); publish(devs)
 
             except Exception as e:
-                logmsg = f"error: {e}"
-                print(f"  inbox error: {e}")
+                log_msg = f"error: {e}"; print(f"  error: {e}")
                 traceback.print_exc()
-
             hc.remove(k)
 
-        # ── commands directed at us ──
-        cmd_val = snap.get(f"_cmd/{ME}")
-        if cmd_val:
-            cmd = unpack(cmd_val)
-            if cmd.get("action") == "disconnect" and now - float(cmd.get("t", 0)) < 15:
-                addr = cmd.get("address", "")
-                print(f"remote cmd: disconnect {addr}")
+        # ── remote commands ──
+        cv = snap.get(f"_cmd/{ME}")
+        if cv:
+            cmd = unpack(cv)
+            if cmd.get("action") == "release" and now - float(cmd.get("t",0)) < 15:
+                addr = cmd.get("address","")
+                print(f"remote: release {addr}")
                 ok, txt = bt.disconnect(addr)
                 print(f"  → {txt}")
-                devices = bt.scan(); publish_devices(devices)
+                devs = bt.scan(); publish(devs)
             hc.remove(f"_cmd/{ME}")
 
-        # ── UI refresh ──
+        # ── UI ──
         if now - last_ui > 1.5:
             last_ui = now
+            ms, alive = machines_from(snap, now)
 
-            machines = read_machines(snap)
-            alive    = read_alive(snap, now)
+            hc.write("root/d",
+                status=f"{len(alive)} machine(s) · {len(devs)} local devices",
+                log=log_msg, ts=time.strftime("%H:%M:%S"))
 
-            hc.write("root/dash",
-                status=f"{len(alive)} machine(s) · {len(devices)} local device(s)",
-                log=logmsg,
-                ts=time.strftime("%H:%M:%S"))
+            for mid, info in ms.items():
+                is_me = mid == ME
+                mn  = str(info.get("name",mid[:16]))[:24]
+                mo  = str(info.get("os","?"))
+                mbt = str(info.get("bt","?"))
+                adm = info.get("admin", True)
+                md  = info.get("devices",[])
+                if isinstance(md, str):
+                    try: md = json.loads(md)
+                    except: md = []
 
-            for mid, info in machines.items():
-                is_me = (mid == ME)
-                mn  = str(info.get("name", mid[:16]))[:24]
-                mo  = str(info.get("os", "?"))
-                mbt = str(info.get("bt", "?"))
-                mdevs = info.get("devices", [])
-                if isinstance(mdevs, str):
-                    try: mdevs = json.loads(mdevs)
-                    except: mdevs = []
+                mp = f"root/d/m_{mid[:12]}"
+                ic = "💻" if "arwin" in mo else "🖥️"
+                up = mid in alive
 
-                mp = f"root/dash/m_{mid[:12]}"
-                icon = "💻" if "arwin" in mo else "🖥️"
-                is_up = mid in alive
+                if is_me:  bg = "⬤ THIS MACHINE"
+                elif up:   bg = "● ONLINE"
+                else:      bg = "○ OFFLINE"
 
-                if is_me:       badge = "⬤ THIS MACHINE"
-                elif is_up:     badge = "● ONLINE"
-                else:           badge = "○ OFFLINE"
+                warn = "" if adm else " ⚠️ needs admin"
+                hc.mount(mp, html=MCARD, layer=5)
+                hc.write(mp, ic=ic, nm=mn,
+                    sub=f"{mo} · {mbt} · {len(md)} device(s){warn}", bg=bg)
 
-                hc.mount(mp, html=MACHINE_HTML, layer=5)
-                hc.write(mp, icon=icon, mname=mn,
-                    msub=f"{mo} · {mbt} · {len(mdevs)} device(s)",
-                    badge=badge)
-
-                # device rows
-                for i, dev in enumerate(mdevs):
+                for i, dv in enumerate(md):
                     dp = f"{mp}/d{i}"
-                    hc.mount(dp, html=device_row(dev, mid, is_me), layer=5)
+                    hc.mount(dp, html=dev_row(dv, mid, is_me), layer=5)
 
         time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nshutting down...")
-        hc.stop()
-        break
+        print("\nshutting down..."); hc.stop(); break
     except Exception as e:
-        print(f"loop error: {e}")
-        traceback.print_exc()
-        time.sleep(2)
+        print(f"loop error: {e}"); traceback.print_exc(); time.sleep(2)
