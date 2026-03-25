@@ -6,11 +6,10 @@ Writes weather data to the graph. Runs independently.
 Any app can read these paths — the globe, a dashboard, a ticker, anything.
 """
 
-import time
-import random
+import time, random
 from HyperCoreSDK.client import HyperClient
 
-hc = HyperClient(root="weather14", port=8765)
+hc = HyperClient(root="weather888", port=8765)
 hc.connect()
 
 # Cities this feed is responsible for
@@ -31,83 +30,20 @@ CITIES = {
 
 CONDS = ["☀️ Sunny", "🌧️ Rain", "⛅ Cloudy", "🌤️ Partly", "❄️ Cold", "🌩️ Storms"]
 
-
-def verify_city(path):
-    """Read back a node to confirm it exists in the graph."""
-    data = hc.read(path)
-    if not data:
-        return False, {}
-    return True, data
-
-
-def count_weather_nodes():
-    snap = hc.snapshot()
-    keys = sorted(k for k in snap.keys() if k.startswith("data/weather/"))
-    return keys, snap
-
-
-print("=" * 60)
-print("weather_feed starting")
-print("root:", hc.root)
-print("relay:", hc.relay_url)
-print("browser:", hc.browser_url)
-print("=" * 60)
-
-cycle = 0
-
 while True:
-    cycle += 1
-    print(f"\n--- cycle {cycle} ---")
-
-    ok_writes = 0
-
     for key, info in CITIES.items():
-        path = f"data/weather/{key}"
-
+        # In production: fetch from a real weather API
         temp = random.randint(30, 100)
         cond = random.choice(CONDS)
 
-        wrote = hc.write(
-            path,
-            city=info["city"],
-            lat=info["lat"],
-            lng=info["lng"],
-            region=info["region"],
-            temp=temp,
-            cond=cond,
+        hc.write(f"data/weather/{key}",
+            city   = info["city"],
+            lat    = info["lat"],
+            lng    = info["lng"],
+            region = info["region"],
+            temp   = temp,
+            cond   = cond,
         )
 
-        exists, data = verify_city(path)
-
-        print(
-            f"[{key:12}] write={wrote!s:5} "
-            f"readback={exists!s:5} "
-            f"city={info['city']:<12} "
-            f"temp={temp:>3} "
-            f"cond={cond}"
-        )
-
-        if exists:
-            print(
-                f"             stored -> "
-                f"region={data.get('region')} "
-                f"lat={data.get('lat')} "
-                f"lng={data.get('lng')} "
-                f"temp={data.get('temp')} "
-                f"cond={data.get('cond')}"
-            )
-
-        if wrote and exists:
-            ok_writes += 1
-
-    keys, snap = count_weather_nodes()
-    print(f"\ncycle summary: {ok_writes}/{len(CITIES)} writes verified")
-    print(f"snapshot weather node count: {len(keys)}")
-
-    if keys:
-        sample = keys[:5]
-        print("sample keys:")
-        for k in sample:
-            print("  ", k, "->", snap[k])
-
+    print(f"Updated {len(CITIES)} cities")
     time.sleep(30)

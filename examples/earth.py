@@ -10,10 +10,10 @@ Run weather_feed.py (or any other writer) to populate the data.
 import time, json
 from HyperCoreSDK.client import HyperClient
 
-hc = HyperClient(root="weather14", port=8765)
+hc = HyperClient(root="weather888", port=8765)
 hc.connect()
-hc.remove("root/_cmd")
-hc.remove("root/globe")
+hc.clear()
+
 # ── Globe setup (boilerplate hidden in a helper) ───────────────────
 
 def mount_globe(hc, key="root/globe"):
