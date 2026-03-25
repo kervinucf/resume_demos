@@ -2,7 +2,7 @@
 """
     python weather_feed.py --discovery lan --port 8766
 
-Writes weather data to the graph. Gun syncs it to any peered relay.
+Writes weather to gun paths. That's it.
 """
 
 import argparse, time, random
@@ -13,15 +13,15 @@ p.add_argument("--discovery", default="lan")
 p.add_argument("--port", type=int, default=8766)
 a = p.parse_args()
 
-hc = HyperClient(root="weather8887", discovery=a.discovery, port=a.port)
+hc = HyperClient(root="weather", discovery=a.discovery, port=a.port)
 hc.connect()
+# NO hc.clear() — we don't own the UI, we just write data
 
 CITIES = [
     ("new_york",    "New York",     40.71,  -74.01, "north_america"),
     ("los_angeles", "Los Angeles",  34.05, -118.24, "north_america"),
     ("london",      "London",       51.51,   -0.13, "europe"),
     ("paris",       "Paris",        48.86,    2.35, "europe"),
-    ("moscow",      "Moscow",       55.76,   37.62, "europe"),
     ("tokyo",       "Tokyo",        35.68,  139.69, "asia"),
     ("mumbai",      "Mumbai",       19.08,   72.88, "asia"),
     ("cairo",       "Cairo",        30.04,   31.24, "africa"),

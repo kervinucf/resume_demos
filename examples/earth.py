@@ -2,9 +2,6 @@
 """
     python weather_globe.py --discovery lan --port 8765
     open http://localhost:8765/weather
-
-Reads weather from the gun graph (written by weather_feed.py on any peer).
-Renders a globe that tours through regions showing markers.
 """
 
 import argparse, time, json
@@ -15,18 +12,17 @@ p.add_argument("--discovery", default="lan")
 p.add_argument("--port", type=int, default=8765)
 a = p.parse_args()
 
-hc = HyperClient(root="weather8887", discovery=a.discovery, port=a.port)
+hc = HyperClient(root="weather", discovery=a.discovery, port=a.port)
 hc.connect()
-hc.clear()
 
-# ── Globe HTML + JS ────────────────────────────────────────────────
+# Only clear UI, not data — remove old root/* mounts but leave data/* alone
+for key in hc.keys():
+    if key.startswith("root/"):
+        hc.remove(key)
 
-GLOBE_HTML = """
-<div style="width:100%;height:100%;position:relative;background:#000;font-family:sans-serif">
-  <div id="g" style="width:100%;height:100%"></div>
-  <div data-bind-text="region" style="position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:bold;color:#fff;text-shadow:0 2px 8px #000"></div>
-</div>
-"""
+# ── Globe ──────────────────────────────────────────────────────────
+
+GLOBE_HTML = '<div id="g" style="width:100vw;height:100vh;overflow:visible"></div>'
 
 GLOBE_JS = r"""
 (function(){
@@ -34,42 +30,45 @@ GLOBE_JS = r"""
   window._g = 1;
 
   var s = document.createElement("script");
-  s.src = "//cdn.jsdelivr.net/npm/globe.gl";
-  s.onload = init;
-  document.head.appendChild(s);
-
-  function init() {
+  s.src = "https://cdn.jsdelivr.net/npm/globe.gl";
+  s.onload = function() {
     var el = document.getElementById("g");
-    if (!el || !el.offsetHeight) { setTimeout(init, 100); return; }
 
     window._w = new Globe(el)
-      .globeImageUrl("//cdn.jsdelivr.net/npm/three-globe/example/img/earth-dark.jpg")
-      .backgroundColor("rgba(0,0,0,0)")
+      .globeImageUrl("https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-dark.jpg")
+      .backgroundColor("#000")
       .showAtmosphere(true)
       .width(el.offsetWidth)
       .height(el.offsetHeight)
-      .htmlLat("lat").htmlLng("lng").htmlAltitude(0.01)
+      .htmlLat("lat").htmlLng("lng").htmlAltitude(0.1)
       .htmlElement(function(d) {
-        var e = document.createElement("div");
-        e.style.cssText = "transform:translate(-50%,-100%);text-align:center";
-        e.innerHTML =
-          "<div style='background:#fff2;border:1px solid #fff3;padding:3px 6px;border-radius:6px'>" +
-          "<div style='font-size:10px;color:#fff'>" + d.city + "</div>" +
-          "<div style='font-size:15px;font-weight:bold;color:#facc15'>" + d.temp + "°F</div>" +
-          "<div style='font-size:9px;color:#94a3b8'>" + d.cond + "</div></div>";
-        return e;
+        var div = document.createElement("div");
+        div.innerHTML =
+          "<div style='color:#fff;background:rgba(255,200,0,0.9);padding:6px 10px;border-radius:6px;font-family:sans-serif;font-size:14px;white-space:nowrap'>" +
+          d.city + " " + d.temp + "°F</div>";
+        return div;
       });
+
+    // Fix overflow on all ancestors so CSS2DRenderer markers aren't clipped
+    var node = el;
+    while (node && node !== document.body) {
+      node.style.overflow = "visible";
+      node = node.parentElement;
+    }
 
     new ResizeObserver(function() {
       window._w.width(el.offsetWidth).height(el.offsetHeight);
     }).observe(el);
-  }
+
+    console.log("Globe ready");
+  };
+  document.head.appendChild(s);
 })();
 """
 
 hc.mount("root/globe", html=GLOBE_HTML, js=GLOBE_JS, fixed=True, layer=10)
 
-# ── Region tour ────────────────────────────────────────────────────
+# ── Regions ────────────────────────────────────────────────────────
 
 REGIONS = [
     ("North America", "north_america", 38, -98),
@@ -79,32 +78,46 @@ REGIONS = [
     ("Oceania",       "oceania",      -28, 145),
 ]
 
-def cities_for(region_key):
-    """Read weather data from local snapshot (Gun keeps it synced)."""
-    markers = []
-    for key, val in hc.snapshot().items():
-        if key.startswith("data/weather/") and val.get("region") == region_key:
-            markers.append({
-                "city": val.get("city", "?"),
-                "lat":  float(val.get("lat", 0)),
-                "lng":  float(val.get("lng", 0)),
-                "temp": val.get("temp", "?"),
-                "cond": val.get("cond", "?"),
-            })
-    return markers
+# ── Tour ───────────────────────────────────────────────────────────
+
+cmd_counter = 0
 
 while True:
-    for name, key, lat, lng in REGIONS:
-        markers = cities_for(key)
-        hc.write("root/globe", region=name)
-        hc.mount("root/_fly", layer=0, js=
-            f"if(window._w){{window._w.pointOfView({{lat:{lat},lng:{lng},altitude:1.8}},1500);"
-            f"window._w.htmlElementsData({json.dumps(markers)})}}"
+    for name, region_key, lat, lng in REGIONS:
+
+        # Read weather data from local snapshot (Gun-synced from feed)
+        markers = []
+        snap = hc.snapshot()
+        for key, val in snap.items():
+            if key.startswith("data/weather/") and val.get("region") == region_key:
+                markers.append({
+                    "city": val.get("city", "?"),
+                    "lat":  float(val.get("lat", 0)),
+                    "lng":  float(val.get("lng", 0)),
+                    "temp": str(val.get("temp", "?")),
+                    "cond": val.get("cond", "?"),
+                })
+
+        print(f"{name}: {len(markers)} markers — {[m['city'] for m in markers]}")
+
+        # Fly + show markers — unique key each time so JS always re-executes
+        cmd_counter += 1
+        hc.mount(f"root/_cmd{cmd_counter}", layer=0, js=
+            f"if(window._w){{"
+            f"window._w.pointOfView({{lat:{lat},lng:{lng},altitude:1.8}},1500);"
+            f"window._w.htmlElementsData({json.dumps(markers)})"
+            f"}}"
         )
         time.sleep(5)
 
-        # Clear before next region
-        hc.mount("root/_fly", layer=0, js=
+        # Clear markers
+        cmd_counter += 1
+        hc.mount(f"root/_cmd{cmd_counter}", layer=0, js=
             "if(window._w)window._w.htmlElementsData([])"
         )
         time.sleep(0.8)
+
+        # Clean up old command nodes
+        for k in hc.keys():
+            if k.startswith("root/_cmd"):
+                hc.remove(k)
