@@ -10,7 +10,7 @@ import time
 import random
 from HyperCoreSDK.client import HyperClient
 
-hc = HyperClient(root="weather12", port=8765)
+hc = HyperClient(root="weather14", port=8765)
 hc.connect()
 
 # Cities this feed is responsible for

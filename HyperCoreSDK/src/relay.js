@@ -18,7 +18,11 @@ const PORT = parseInt(process.env.PORT || '8765', 10);
 const BIND = process.env.HYPER_BIND_HOST || '0.0.0.0';
 
 let PEERS;
-try { PEERS = JSON.parse(process.env.HYPER_PEERS || '[]'); } catch (_) { PEERS = []; }
+try {
+  PEERS = JSON.parse(process.env.HYPER_PEERS || '[]');
+} catch (_) {
+  PEERS = [];
+}
 
 const buckets = {};
 const tokens = {};
@@ -27,64 +31,99 @@ const CONTENT_FIELDS = [
   'html', 'css', 'js', 'link', 'json', 'data', 'meta', 'links', 'actions',
   'layer', 'fixed', 'portal'
 ];
-const ALL_FIELDS = [...CONTENT_FIELDS, 'lat', 'lng', 'altitude', 'duration', 'remove'];
 
-function getBucket(n) {
-  if (!buckets[n]) buckets[n] = { snapshot: {}, subscribed: false };
-  return buckets[n];
+// Standard fields we know about, but deletes should also handle arbitrary keys.
+const ALL_FIELDS = [
+  ...CONTENT_FIELDS,
+  'lat', 'lng', 'altitude', 'duration', 'remove',
+  'city', 'region', 'temp', 'cond', 'name', 'title', 'text', 'user', 'status', 't'
+];
+
+function getBucket(name) {
+  if (!buckets[name]) buckets[name] = { snapshot: {}, subscribed: false };
+  return buckets[name];
 }
-
-function hasContent(d) { return CONTENT_FIELDS.some(f => d[f] !== undefined && d[f] !== null); }
 
 function cleanNodeData(d) {
   const c = {};
-  for (const k of Object.keys(d || {})) { if (k === '_' || k === '#' || k === '>') continue; if (d[k] !== null) c[k] = d[k]; }
+  for (const k of Object.keys(d || {})) {
+    if (k === '_' || k === '#' || k === '>') continue;
+    if (d[k] !== null) c[k] = d[k];
+  }
   delete c.remove;
   return c;
+}
+
+function hasRenderableContent(d) {
+  return CONTENT_FIELDS.some(f => d[f] !== undefined && d[f] !== null);
+}
+
+function hasAnyData(d) {
+  return Object.keys(cleanNodeData(d || {})).length > 0;
 }
 
 function subscribe(name) {
   const b = getBucket(name);
   if (b.subscribed) return;
   b.subscribed = true;
+
   gun.get(name).get('scene').map().on((data, key) => {
     if (!data || key === '_') return;
-    if (!hasContent(data)) { delete b.snapshot[key]; return; }
+
     const clean = cleanNodeData(data);
-    if (Object.keys(clean).length > 0) b.snapshot[key] = clean;
-    else delete b.snapshot[key];
+
+    if (Object.keys(clean).length > 0) {
+      b.snapshot[key] = clean;
+    } else {
+      delete b.snapshot[key];
+    }
   });
 }
 
 function updateSnapshot(b, key, data) {
-  if (!hasContent(data)) return;
-  const merged = { ...(b.snapshot[key] || {}) };
-  for (const [k, v] of Object.entries(data)) { if (v !== null && v !== undefined) merged[k] = v; }
-  delete merged.remove;
-  if (Object.keys(merged).length > 0) b.snapshot[key] = merged;
-  else delete b.snapshot[key];
+  const clean = cleanNodeData(data);
+
+  if (Object.keys(clean).length === 0) {
+    delete b.snapshot[key];
+    return;
+  }
+
+  b.snapshot[key] = {
+    ...(b.snapshot[key] || {}),
+    ...clean
+  };
 }
 
 function deleteSnapshotPath(b, key) {
   delete b.snapshot[key];
   const pfx = key + '/';
-  for (const k of Object.keys(b.snapshot)) { if (k.startsWith(pfx)) delete b.snapshot[k]; }
+  for (const k of Object.keys(b.snapshot)) {
+    if (k.startsWith(pfx)) delete b.snapshot[k];
+  }
 }
 
-function nullOut(bkt, key) {
+function tombstoneForKey(snapshot, key) {
   const tomb = {};
-  for (const f of ALL_FIELDS) tomb[f] = null;
-  gun.get(bkt).get('scene').get(key).put(tomb);
+  const existing = snapshot && snapshot[key] ? Object.keys(snapshot[key]) : [];
+  const fields = new Set([...ALL_FIELDS, ...existing]);
+  for (const f of fields) tomb[f] = null;
+  return tomb;
 }
 
-function nullOutDesc(bkt, snap, key) {
-  nullOut(bkt, key);
+function nullOut(bucketName, snapshot, key) {
+  gun.get(bucketName).get('scene').get(key).put(tombstoneForKey(snapshot, key));
+}
+
+function nullOutDesc(bucketName, snap, key) {
+  nullOut(bucketName, snap, key);
   const pfx = key + '/';
-  for (const k of Object.keys(snap)) { if (k.startsWith(pfx)) nullOut(bkt, k); }
+  for (const k of Object.keys(snap)) {
+    if (k.startsWith(pfx)) nullOut(bucketName, snap, k);
+  }
 }
 
-function checkAuth(bkt, req) {
-  const tok = tokens[bkt];
+function checkAuth(bucketName, req) {
+  const tok = tokens[bucketName];
   if (!tok) return true;
   return (req.headers['authorization'] || '') === 'Bearer ' + tok;
 }
@@ -96,7 +135,11 @@ function sendJson(res, obj, status = 200) {
 }
 
 function readBody(req) {
-  return new Promise(r => { let d = ''; req.on('data', c => d += c); req.on('end', () => r(d)); });
+  return new Promise(resolve => {
+    let d = '';
+    req.on('data', c => d += c);
+    req.on('end', () => resolve(d));
+  });
 }
 
 // ------------------------------------------------------------------
@@ -114,7 +157,17 @@ function shellHTML(bucket) {
 <title>${bucket}</title>
 <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"><\/script>
 <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"><\/script>
-<style>html,body,#scene{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#000}#scene{position:relative}</style>
+<style>
+html,body,#scene{
+  margin:0;
+  padding:0;
+  width:100vw;
+  height:100vh;
+  overflow:hidden;
+  background:#000
+}
+#scene{position:relative}
+</style>
 </head>
 <body>
 <div id="scene"></div>
@@ -144,106 +197,274 @@ function shellHTML(bucket) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {})
-    }).catch(function(e) { console.warn('[action]', e); });
+    }).catch(function(e) {
+      console.warn('[action]', e);
+    });
   };
 
   var CF=['html','css','js','link','json','data','meta','links','actions','layer','fixed','portal'];
-  function has(d){return CF.some(function(f){return d[f]!==undefined&&d[f]!==null})}
-  function cleared(d){return !d||!has(d)}
-  function kid(k){return 'frag-'+String(k).replace(/[^\\w~-]/g,'_')}
-  function par(k){
-    if(k.includes('~'))return k.split('~')[0]||null;
-    var p=k.split('/').filter(Boolean);
-    return p.length<=1?null:p.slice(0,-1).join('/');
+
+  function hasRenderable(d){
+    return CF.some(function(f){
+      return d[f]!==undefined&&d[f]!==null;
+    });
   }
-  function host4(k){return live[k]||document.getElementById(kid(k))||null}
-  function rootS(e,l){e.style.position='fixed';e.style.inset='0';e.style.zIndex=String(l);e.style.pointerEvents=l<=0?'none':'auto'}
-  function childS(e,l){e.style.position='relative';e.style.flex='0 0 auto';e.style.minWidth='0';e.style.minHeight='';e.style.width='';e.style.height='';e.style.top='';e.style.left='';e.style.inset='';e.style.zIndex=String(l);e.style.pointerEvents=l<=0?'none':'auto'}
+
+  function cleared(d){
+    return !d || !hasRenderable(d);
+  }
+
+  function kid(k){
+    return 'frag-'+String(k).replace(/[^\\w~-]/g,'_');
+  }
+
+  function par(k){
+    if(k.includes('~')) return k.split('~')[0]||null;
+    var p=k.split('/').filter(Boolean);
+    return p.length<=1 ? null : p.slice(0,-1).join('/');
+  }
+
+  function host4(k){
+    return live[k] || document.getElementById(kid(k)) || null;
+  }
+
+  function rootS(e,l){
+    e.style.position='fixed';
+    e.style.inset='0';
+    e.style.zIndex=String(l);
+    e.style.pointerEvents=l<=0?'none':'auto';
+  }
+
+  function childS(e,l){
+    e.style.position='relative';
+    e.style.flex='0 0 auto';
+    e.style.minWidth='0';
+    e.style.minHeight='';
+    e.style.width='';
+    e.style.height='';
+    e.style.top='';
+    e.style.left='';
+    e.style.inset='';
+    e.style.zIndex=String(l);
+    e.style.pointerEvents=l<=0?'none':'auto';
+  }
 
   function ensure(key,res,dat){
-    if(live[key])return live[key];
-    var h=document.createElement('div');h.id=kid(key);h.dataset.key=key;
-    var layer=Number(res&&res.layer||dat&&dat.layer||0)||0;
-    var pk=par(key);var isR=key.includes('~');
-    var wRoot=!!(res&&res.fixed||dat&&dat.fixed||res&&res.portal||dat&&dat.portal);
-    var ph=pk?host4(pk):null;
-    if(ph&&!wRoot){
+    if(live[key]) return live[key];
+
+    var h=document.createElement('div');
+    h.id=kid(key);
+    h.dataset.key=key;
+
+    var layer=Number((res&&res.layer)||(dat&&dat.layer)||0)||0;
+    var pk=par(key);
+    var isR=key.includes('~');
+    var wantsRoot=!!((res&&res.fixed)||(dat&&dat.fixed)||(res&&res.portal)||(dat&&dat.portal));
+    var ph=pk ? host4(pk) : null;
+
+    if(ph && !wantsRoot){
       childS(h,layer);
+
       var mp;
-      if(isR){var row=ph.querySelector('[data-row]');if(!row){row=document.createElement('div');row.dataset.row='';row.style.display='flex';row.style.flex='1';row.style.width='100%';row.style.height='100%';row.style.minHeight='0';ph.appendChild(row)}mp=row}
-      else{mp=ph.querySelector('[data-children]')||ph}
+      if(isR){
+        var row=ph.querySelector('[data-row]');
+        if(!row){
+          row=document.createElement('div');
+          row.dataset.row='';
+          row.style.display='flex';
+          row.style.flex='1';
+          row.style.width='100%';
+          row.style.height='100%';
+          row.style.minHeight='0';
+          ph.appendChild(row);
+        }
+        mp=row;
+      } else {
+        mp=ph.querySelector('[data-children]') || ph;
+      }
+
       mp.appendChild(h);
-    }else{rootS(h,layer);root.appendChild(h)}
-    live[key]=h;return h;
+    } else {
+      rootS(h,layer);
+      root.appendChild(h);
+    }
+
+    live[key]=h;
+    return h;
   }
 
   function restyle(h,key,res,dat){
-    var layer=Number(res&&res.layer||dat&&dat.layer||0)||0;
-    var pk=par(key);var wRoot=!!(res&&res.fixed||dat&&dat.fixed||res&&res.portal||dat&&dat.portal);
-    var ph=pk?host4(pk):null;
-    if(!ph||wRoot){rootS(h,layer);if(h.parentElement!==root)root.appendChild(h);return}
+    var layer=Number((res&&res.layer)||(dat&&dat.layer)||0)||0;
+    var pk=par(key);
+    var wantsRoot=!!((res&&res.fixed)||(dat&&dat.fixed)||(res&&res.portal)||(dat&&dat.portal));
+    var ph=pk ? host4(pk) : null;
+
+    if(!ph || wantsRoot){
+      rootS(h,layer);
+      if(h.parentElement!==root) root.appendChild(h);
+      return;
+    }
+
     childS(h,layer);
-    var isR=key.includes('~');var mp;
-    if(isR){var row=ph.querySelector('[data-row]');if(!row){row=document.createElement('div');row.dataset.row='';row.style.display='flex';row.style.flex='1';row.style.width='100%';row.style.height='100%';row.style.minHeight='0';ph.appendChild(row)}mp=row}
-    else{mp=ph.querySelector('[data-children]')||ph}
-    if(h.parentElement!==mp)mp.appendChild(h);
+
+    var isR=key.includes('~');
+    var mp;
+    if(isR){
+      var row=ph.querySelector('[data-row]');
+      if(!row){
+        row=document.createElement('div');
+        row.dataset.row='';
+        row.style.display='flex';
+        row.style.flex='1';
+        row.style.width='100%';
+        row.style.height='100%';
+        row.style.minHeight='0';
+        ph.appendChild(row);
+      }
+      mp=row;
+    } else {
+      mp=ph.querySelector('[data-children]') || ph;
+    }
+
+    if(h.parentElement!==mp) mp.appendChild(h);
   }
 
-  function prune(){var rows=root.querySelectorAll('[data-row]');for(var i=0;i<rows.length;i++)if(!rows[i].children.length)rows[i].remove()}
+  function prune(){
+    var rows=root.querySelectorAll('[data-row]');
+    for(var i=0;i<rows.length;i++){
+      if(!rows[i].children.length) rows[i].remove();
+    }
+  }
 
   function cleanup(key){
-    if(key==='root')return;
-    var a=key+'/',b=key+'~';
-    for(var k of Object.keys(live)){if(k==='root')continue;if(k===key||k.startsWith(a)||k.startsWith(b)){if(live[k])live[k].remove();delete live[k];var c=document.getElementById('css-'+k);if(c)c.remove();delete jsH[k]}}
+    if(key==='root') return;
+    var a=key+'/', b=key+'~';
+
+    for(var k of Object.keys(live)){
+      if(k==='root') continue;
+      if(k===key || k.startsWith(a) || k.startsWith(b)){
+        if(live[k]) live[k].remove();
+        delete live[k];
+        var c=document.getElementById('css-'+k);
+        if(c) c.remove();
+        delete jsH[k];
+      }
+    }
     prune();
   }
 
-  function qh(s){var h=0;for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h}
+  function qh(s){
+    var h=0;
+    for(var i=0;i<s.length;i++) h=((h<<5)-h+s.charCodeAt(i))|0;
+    return h;
+  }
 
   function bind(host,res){
     var nodes=host.querySelectorAll('[data-bind-text],[data-bind-html],[data-bind-style]');
     for(var i=0;i<nodes.length;i++){
       var el=nodes[i];
-      if(el.dataset.bindText&&res[el.dataset.bindText]!==undefined)el.textContent=res[el.dataset.bindText];
-      if(el.dataset.bindHtml&&res[el.dataset.bindHtml]!==undefined)el.innerHTML=res[el.dataset.bindHtml];
+
+      if(el.dataset.bindText && res[el.dataset.bindText]!==undefined){
+        el.textContent=res[el.dataset.bindText];
+      }
+
+      if(el.dataset.bindHtml && res[el.dataset.bindHtml]!==undefined){
+        el.innerHTML=res[el.dataset.bindHtml];
+      }
+
       if(el.dataset.bindStyle){
         var pairs=el.dataset.bindStyle.split(';');
-        for(var j=0;j<pairs.length;j++){var pp=pairs[j].split(':');if(pp[0]&&pp[1]&&res[pp[1].trim()]!==undefined)el.style[pp[0].trim()]=res[pp[1].trim()]}
+        for(var j=0;j<pairs.length;j++){
+          var pp=pairs[j].split(':');
+          if(pp[0] && pp[1] && res[pp[1].trim()]!==undefined){
+            el.style[pp[0].trim()]=res[pp[1].trim()];
+          }
+        }
       }
     }
   }
 
   async function renderR(dat,key,res){
-    if(!res)return;
-    if(res.css!=null){var s=document.getElementById('css-'+key);if(!s){s=document.createElement('style');s.id='css-'+key;document.head.appendChild(s)}s.textContent=res.css}
-    if(res.html!=null){var h=ensure(key,res,dat);restyle(h,key,res,dat);if(!h._m){h.innerHTML=res.html;h._m=true}bind(h,res)}
-    if(res.js!=null){var hh=qh(res.js);if(jsH[key]!==hh){jsH[key]=hh;try{await new AF(res.js)()}catch(e){console.error('['+key+']',e)}}}
+    if(!res) return;
+
+    if(res.css!=null){
+      var s=document.getElementById('css-'+key);
+      if(!s){
+        s=document.createElement('style');
+        s.id='css-'+key;
+        document.head.appendChild(s);
+      }
+      s.textContent=res.css;
+    }
+
+    if(res.html!=null){
+      var h=ensure(key,res,dat);
+      restyle(h,key,res,dat);
+      if(!h._m){
+        h.innerHTML=res.html;
+        h._m=true;
+      }
+      bind(h,res);
+    }
+
+    if(res.js!=null){
+      var hh=qh(res.js);
+      if(jsH[key]!==hh){
+        jsH[key]=hh;
+        try{
+          await new AF(res.js)();
+        }catch(e){
+          console.error('['+key+']',e);
+        }
+      }
+    }
   }
 
   async function render(dat,key){
-    if(!dat||key==='_')return;
-    if(cleared(dat)){cleanup(key);return}
+    if(!dat || key==='_') return;
+    if(cleared(dat)){
+      cleanup(key);
+      return;
+    }
     await renderR(dat,key,dat);
   }
 
   // ── Real-time: Gun fires render on every change ──
-  scene.map().on(function(d,k){render(d,k)});
+  scene.map().on(function(d,k){
+    render(d,k);
+  });
 
   // ── Snapshot sync: reconcile ordering + clean ghosts ──
   async function sync(){
     try{
       var r=await fetch('/'+bucket+'/api/snapshot',{cache:'no-store'});
       var snap=await r.json();
-      if(!snap||typeof snap!=='object')return;
-      var keys=Object.keys(snap).sort(function(a,b){return a.replace(/~/g,'/').split('/').length-b.replace(/~/g,'/').split('/').length});
-      var w=new Set(keys);
-      for(var i=0;i<keys.length;i++)await render(snap[keys[i]],keys[i]);
-      // Remove anything in the DOM that the relay doesn't know about (Gun ghosts)
-      for(var k of Object.keys(live)){if(k==='root')continue;if(!w.has(k))cleanup(k)}
-    }catch(e){console.warn('[sync]',e)}
+      if(!snap || typeof snap!=='object') return;
+
+      var keys=Object.keys(snap).sort(function(a,b){
+        return a.replace(/~/g,'/').split('/').length - b.replace(/~/g,'/').split('/').length;
+      });
+
+      var wanted=new Set(keys);
+
+      for(var i=0;i<keys.length;i++){
+        await render(snap[keys[i]],keys[i]);
+      }
+
+      // Remove anything in the DOM that the relay doesn't know about
+      for(var k of Object.keys(live)){
+        if(k==='root') continue;
+        if(!wanted.has(k)) cleanup(k);
+      }
+    }catch(e){
+      console.warn('[sync]',e);
+    }
   }
 
-  (async function(){await sync();setInterval(sync,250)})();
+  (async function(){
+    await sync();
+    setInterval(sync,250);
+  })();
 })();
 <\/script>
 </body>
@@ -258,25 +479,32 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
 
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const segs = parsed.pathname.split('/').filter(Boolean);
 
   if (segs[0] === 'gun') return;
-  if (segs.length === 0) return sendJson(res, { relay: true, buckets: Object.keys(buckets) });
+  if (segs.length === 0) {
+    return sendJson(res, { relay: true, buckets: Object.keys(buckets) });
+  }
 
-  const bkt = segs[0];
+  const bucketName = segs[0];
   const action = segs[1] || '';
   const rest = segs.slice(2).join('/');
 
-  subscribe(bkt);
-  const b = getBucket(bkt);
+  subscribe(bucketName);
+  const b = getBucket(bucketName);
 
   // Shell
   if (req.method === 'GET' && (action === '' || action === 'index.html')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(shellHTML(bkt));
+    return res.end(shellHTML(bucketName));
   }
 
   // Action — browser POSTs here, relay stashes in snapshot + Gun
@@ -287,7 +515,7 @@ const server = http.createServer(async (req, res) => {
       const key = 'inbox/' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
       const node = { data: JSON.stringify(payload) };
       b.snapshot[key] = node;
-      gun.get(bkt).get('scene').get(key).put(node);
+      gun.get(bucketName).get('scene').get(key).put(node);
       return sendJson(res, { ok: true, key });
     } catch (e) {
       return sendJson(res, { error: e.message }, 400);
@@ -297,21 +525,31 @@ const server = http.createServer(async (req, res) => {
   // Scene CRUD
   if (action === 'scene' && rest) {
     if (req.method === 'PUT') {
-      if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
+      if (!checkAuth(bucketName, req)) {
+        return sendJson(res, { error: 'unauthorized' }, 401);
+      }
       try {
         const data = JSON.parse(await readBody(req));
-        gun.get(bkt).get('scene').get(rest).put(data);
+        gun.get(bucketName).get('scene').get(rest).put(data);
         updateSnapshot(b, rest, data);
         return sendJson(res, { ok: true, path: rest });
-      } catch (e) { return sendJson(res, { error: e.message }, 400); }
+      } catch (e) {
+        return sendJson(res, { error: e.message }, 400);
+      }
     }
+
     if (req.method === 'DELETE') {
-      if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
-      nullOutDesc(bkt, b.snapshot, rest);
+      if (!checkAuth(bucketName, req)) {
+        return sendJson(res, { error: 'unauthorized' }, 401);
+      }
+      nullOutDesc(bucketName, b.snapshot, rest);
       deleteSnapshotPath(b, rest);
       return sendJson(res, { ok: true, path: rest });
     }
-    if (req.method === 'GET') { return sendJson(res, b.snapshot[rest] || null); }
+
+    if (req.method === 'GET') {
+      return sendJson(res, b.snapshot[rest] || null);
+    }
   }
 
   // Frag
@@ -320,14 +558,25 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       return res.end(b.snapshot[rest] ? (b.snapshot[rest].html || '') : '');
     }
+
     if (req.method === 'POST') {
-      if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
+      if (!checkAuth(bucketName, req)) {
+        return sendJson(res, { error: 'unauthorized' }, 401);
+      }
+
       const raw = await readBody(req);
       const ct = req.headers['content-type'] || '';
       let html = raw;
-      if (ct.includes('json')) { try { html = JSON.parse(raw).html || raw; } catch(e) {} }
-      gun.get(bkt).get('scene').get(rest).put({ html });
+
+      if (ct.includes('json')) {
+        try {
+          html = JSON.parse(raw).html || raw;
+        } catch (_) {}
+      }
+
+      gun.get(bucketName).get('scene').get(rest).put({ html });
       updateSnapshot(b, rest, { html });
+
       res.writeHead(200, { 'Content-Type': 'text/html' });
       return res.end(html);
     }
@@ -335,25 +584,48 @@ const server = http.createServer(async (req, res) => {
 
   // API
   if (action === 'api') {
-    if (req.method === 'GET' && rest === 'keys') return sendJson(res, Object.keys(b.snapshot));
-    if (req.method === 'GET' && rest === 'snapshot') return sendJson(res, b.snapshot);
-    if (req.method === 'GET' && rest === 'stats') return sendJson(res, { fragments: Object.keys(b.snapshot).length, auth: !!tokens[bkt] });
+    if (req.method === 'GET' && rest === 'keys') {
+      return sendJson(res, Object.keys(b.snapshot));
+    }
+
+    if (req.method === 'GET' && rest === 'snapshot') {
+      return sendJson(res, b.snapshot);
+    }
+
+    if (req.method === 'GET' && rest === 'stats') {
+      const renderable = Object.values(b.snapshot).filter(hasRenderableContent).length;
+      return sendJson(res, {
+        fragments: renderable,
+        nodes: Object.keys(b.snapshot).length,
+        auth: !!tokens[bucketName]
+      });
+    }
+
     if (req.method === 'POST' && rest === 'clear') {
-      if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
-      for (const key of Object.keys(b.snapshot)) nullOut(bkt, key);
+      if (!checkAuth(bucketName, req)) {
+        return sendJson(res, { error: 'unauthorized' }, 401);
+      }
+      for (const key of Object.keys(b.snapshot)) nullOut(bucketName, b.snapshot, key);
       b.snapshot = {};
       return sendJson(res, { ok: true });
     }
+
     if (req.method === 'POST' && rest === 'auth') {
       try {
         const { token } = JSON.parse(await readBody(req));
-        if (!token) delete tokens[bkt]; else tokens[bkt] = token;
+        if (!token) delete tokens[bucketName];
+        else tokens[bucketName] = token;
         return sendJson(res, { ok: true });
-      } catch (e) { return sendJson(res, { error: 'need {token}' }, 400); }
+      } catch (_) {
+        return sendJson(res, { error: 'need {token}' }, 400);
+      }
     }
   }
 
-  if (!res.headersSent) { res.writeHead(404); res.end('Not found'); }
+  if (!res.headersSent) {
+    res.writeHead(404);
+    res.end('Not found');
+  }
 });
 
 const gun = Gun({ peers: PEERS, web: server, radisk: false });
