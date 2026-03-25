@@ -11,7 +11,6 @@ Relays peer with each other via Gun. mDNS for zero-config LAN discovery.
 
     hc = HyperClient(root="chat", discovery="lan")
     hc.connect()
-    # prints: http://localhost:8765/chat — open that
 """
 
 from __future__ import annotations
@@ -40,6 +39,25 @@ log = logging.getLogger(__name__)
 
 MDNS_TYPE = "_hyper._tcp.local."
 
+
+# ------------------------------------------------------------------
+# Action — what Python receives from the browser
+# ------------------------------------------------------------------
+
+class Action(dict):
+    """A browser action. Has a .name and field access via [] or .get()."""
+
+    def __init__(self, name: str, fields: dict):
+        super().__init__(fields)
+        self.name = name
+
+    def __repr__(self):
+        return f"Action({self.name!r}, {dict(self)})"
+
+
+# ------------------------------------------------------------------
+# mDNS helpers
+# ------------------------------------------------------------------
 
 def _mdns_ok():
     try:
@@ -185,6 +203,9 @@ class HyperClient:
     def stop_relay(self): self.stop()
 
     # ------------------------------------------------------------------
+    # Scene
+    # ------------------------------------------------------------------
+
     def mount(self, key, *, html="", css="", js="", fixed=False, layer=0, **kw):
         return self._put(f"scene/{key}", {"html": html, "css": css, "js": js,
             "fixed": fixed, "layer": layer, **kw})
@@ -197,12 +218,108 @@ class HyperClient:
         for k, v in fields.items(): c[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
         return self._put(f"scene/{path}", c)
 
+    def read(self, path): return self._get(f"scene/{path}") or {}
     def remove(self, path): return self._delete(f"scene/{path}")
     def clear(self): return self._post("api/clear") is not None
     def snapshot(self): return self._get("api/snapshot") or {}
     def keys(self): return self._get("api/keys") or []
 
     # ------------------------------------------------------------------
+    # Actions — declared, generated, consumed
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def actions_js(**action_defs):
+        """Generate JS from action declarations.
+
+        Each kwarg is an action name mapped to a dict:
+            fields:  list of element IDs to read .value from
+            trigger: element ID whose click fires the action
+            submit:  (optional) element ID to clear after fire + Enter to submit
+
+        Example:
+            hc.actions_js(
+                send={
+                    "fields":  ["user", "text"],
+                    "trigger": "send",
+                    "submit":  "text",
+                }
+            )
+
+        Generates JS that:
+            - Guards against double-init (dataset.on)
+            - Reads .value from each field element
+            - Calls action({ _action: "send", user: "...", text: "..." })
+            - Clears the submit field
+            - Wires Enter key on the submit field
+        """
+        lines = ["(function(){"]
+
+        # Collect all element IDs we need
+        all_ids = set()
+        for name, defn in action_defs.items():
+            for fid in defn.get("fields", []):
+                all_ids.add(fid)
+            all_ids.add(defn["trigger"])
+
+        # Get elements + guard
+        guard_id = list(action_defs.values())[0]["trigger"]
+        for eid in sorted(all_ids):
+            lines.append(f'  var el_{eid}=document.getElementById("{eid}");')
+        lines.append(f'  if(!el_{guard_id}||el_{guard_id}.dataset.on)return;')
+        lines.append(f'  el_{guard_id}.dataset.on=1;')
+
+        # Generate a function for each action
+        for name, defn in action_defs.items():
+            fields = defn.get("fields", [])
+            trigger = defn["trigger"]
+            submit = defn.get("submit")
+
+            fn_name = f"do_{name}"
+            field_reads = ", ".join(
+                f'{fid}:el_{fid}.value.trim()' for fid in fields
+            )
+            lines.append(f'  function {fn_name}(){{')
+            if submit:
+                lines.append(f'    if(!el_{submit}.value.trim())return;')
+            lines.append(f'    action({{_action:"{name}",{field_reads}}});')
+            if submit:
+                lines.append(f'    el_{submit}.value="";')
+            lines.append(f'  }}')
+
+            # Wire trigger click
+            lines.append(f'  el_{trigger}.onclick={fn_name};')
+
+            # Wire Enter on submit field
+            if submit:
+                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){fn_name}();}};')
+
+        lines.append("})();")
+        return "\n".join(lines)
+
+    def actions(self):
+        """Yield each pending browser action as an Action object.
+
+        Actions have a .name (from _action field) and dict-style field access.
+        Cleanup is automatic.
+        """
+        snap = self.snapshot()
+        for key in list(snap):
+            if not key.startswith("inbox/"):
+                continue
+            raw = snap[key].get("data", "{}")
+            try:
+                msg = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                msg = {}
+            self.remove(key)
+            name = msg.pop("_action", "unknown")
+            yield Action(name, msg)
+
+    # ------------------------------------------------------------------
+    # Machines
+    # ------------------------------------------------------------------
+
     def _register(self):
         self.write(f"_machines/{self.machine_id}/info",
             machine_id=self.machine_id, name=self.machine_name,
@@ -304,4 +421,4 @@ class _NB:
     def write(self, **f): self._d.update(f); return self
     def commit(self): self._c.write(self._p, **self._d); return self
 
-__all__ = ["HyperClient"]
+__all__ = ["HyperClient", "Action"]

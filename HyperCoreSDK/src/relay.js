@@ -2,7 +2,7 @@
  * Scene Relay — every machine runs one, they peer with each other.
  *
  * Browser always opens localhost. Gun syncs data across relays.
- * Shell HTML is generated with CDN-loaded Gun (no /gun/gun.js middleware dependency).
+ * Shell HTML is generated with CDN-loaded Gun.
  *
  * Env vars:
  *   PORT               (default 8765)
@@ -100,11 +100,10 @@ function readBody(req) {
 }
 
 // ------------------------------------------------------------------
-// Shell HTML — uses CDN for gun.js, not /gun/gun.js middleware
+// Shell HTML
 // ------------------------------------------------------------------
 
 function shellHTML(bucket) {
-  // All peers: localhost + LAN IPs + discovered remotes
   const peersJSON = JSON.stringify(PEERS);
 
   return `<!DOCTYPE html>
@@ -138,6 +137,15 @@ function shellHTML(bucket) {
   window.$scene=scene;
   window.$root=root;
   window.$bucket=bucket;
+
+  // ── action() — thin client HTTP bridge ──
+  window.action = function(payload) {
+    return fetch('/' + bucket + '/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    }).catch(function(e) { console.warn('[action]', e); });
+  };
 
   var CF=['html','css','js','link','json','data','meta','links','actions','layer','fixed','portal'];
   function has(d){return CF.some(function(f){return d[f]!==undefined&&d[f]!==null})}
@@ -218,8 +226,10 @@ function shellHTML(bucket) {
     await renderR(dat,key,dat);
   }
 
+  // ── Real-time: Gun fires render on every change ──
   scene.map().on(function(d,k){render(d,k)});
 
+  // ── Snapshot sync: reconcile ordering + clean ghosts ──
   async function sync(){
     try{
       var r=await fetch('/'+bucket+'/api/snapshot',{cache:'no-store'});
@@ -228,6 +238,7 @@ function shellHTML(bucket) {
       var keys=Object.keys(snap).sort(function(a,b){return a.replace(/~/g,'/').split('/').length-b.replace(/~/g,'/').split('/').length});
       var w=new Set(keys);
       for(var i=0;i<keys.length;i++)await render(snap[keys[i]],keys[i]);
+      // Remove anything in the DOM that the relay doesn't know about (Gun ghosts)
       for(var k of Object.keys(live)){if(k==='root')continue;if(!w.has(k))cleanup(k)}
     }catch(e){console.warn('[sync]',e)}
   }
@@ -252,10 +263,7 @@ const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const segs = parsed.pathname.split('/').filter(Boolean);
 
-  // Let Gun handle /gun/*
   if (segs[0] === 'gun') return;
-
-  // Root
   if (segs.length === 0) return sendJson(res, { relay: true, buckets: Object.keys(buckets) });
 
   const bkt = segs[0];
@@ -269,6 +277,21 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && (action === '' || action === 'index.html')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(shellHTML(bkt));
+  }
+
+  // Action — browser POSTs here, relay stashes in snapshot + Gun
+  if (action === 'action' && req.method === 'POST') {
+    try {
+      const raw = await readBody(req);
+      const payload = JSON.parse(raw);
+      const key = 'inbox/' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      const node = { data: JSON.stringify(payload) };
+      b.snapshot[key] = node;
+      gun.get(bkt).get('scene').get(key).put(node);
+      return sendJson(res, { ok: true, key });
+    } catch (e) {
+      return sendJson(res, { error: e.message }, 400);
+    }
   }
 
   // Scene CRUD
@@ -333,8 +356,6 @@ const server = http.createServer(async (req, res) => {
   if (!res.headersSent) { res.writeHead(404); res.end('Not found'); }
 });
 
-// Gun peers with other relays AND serves websocket on this server
-// radisk: false prevents the radata/ file storage errors on Windows
 const gun = Gun({ peers: PEERS, web: server, radisk: false });
 
 server.listen(PORT, BIND, () => {
