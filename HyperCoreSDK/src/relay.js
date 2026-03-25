@@ -49,7 +49,6 @@ function subscribe(name) {
   b.subscribed = true;
   gun.get(name).get('scene').map().on((data, key) => {
     if (!data || key === '_') return;
-    if (!hasContent(data)) { delete b.snapshot[key]; return; }
     const clean = cleanNodeData(data);
     if (Object.keys(clean).length > 0) b.snapshot[key] = clean;
     else delete b.snapshot[key];
@@ -57,14 +56,14 @@ function subscribe(name) {
 }
 
 function updateSnapshot(b, key, data) {
-  if (!hasContent(data)) return;
   const merged = { ...(b.snapshot[key] || {}) };
-  for (const [k, v] of Object.entries(data)) { if (v !== null && v !== undefined) merged[k] = v; }
+  for (const [k, v] of Object.entries(data)) {
+    if (v !== null && v !== undefined) merged[k] = v;
+  }
   delete merged.remove;
   if (Object.keys(merged).length > 0) b.snapshot[key] = merged;
   else delete b.snapshot[key];
 }
-
 function deleteSnapshotPath(b, key) {
   delete b.snapshot[key];
   const pfx = key + '/';
@@ -356,7 +355,7 @@ const server = http.createServer(async (req, res) => {
   if (!res.headersSent) { res.writeHead(404); res.end('Not found'); }
 });
 
-const gun = Gun({ peers: PEERS, web: server, radisk: false });
+const gun = Gun({ peers: PEERS, web: server, radisk: true });
 
 server.listen(PORT, BIND, () => {
   console.log(`Relay: http://localhost:${PORT}`);

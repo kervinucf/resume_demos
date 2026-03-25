@@ -12,7 +12,7 @@ p.add_argument("--discovery", default="lan")
 p.add_argument("--port", type=int, default=8765)
 a = p.parse_args()
 
-hc = HyperClient(root="weather", discovery=a.discovery, port=a.port)
+hc = HyperClient(root="weather77777", discovery=a.discovery, port=a.port)
 hc.connect()
 
 # Only clear UI, not data — remove old root/* mounts but leave data/* alone
@@ -89,6 +89,7 @@ while True:
         markers = []
         snap = hc.snapshot()
         for key, val in snap.items():
+            print(snap)
             if key.startswith("data/weather/") and val.get("region") == region_key:
                 markers.append({
                     "city": val.get("city", "?"),

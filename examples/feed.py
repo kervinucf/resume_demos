@@ -13,7 +13,7 @@ p.add_argument("--discovery", default="lan")
 p.add_argument("--port", type=int, default=8766)
 a = p.parse_args()
 
-hc = HyperClient(root="weather", discovery=a.discovery, port=a.port)
+hc = HyperClient(root="weather77777", discovery=a.discovery, port=a.port)
 hc.connect()
 # NO hc.clear() — we don't own the UI, we just write data
 
