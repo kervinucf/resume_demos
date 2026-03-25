@@ -9,7 +9,7 @@ Any app can read these paths — the globe, a dashboard, a ticker, anything.
 import time, random
 from HyperCoreSDK.client import HyperClient
 
-hc = HyperClient(root="weather", port=8765)
+hc = HyperClient(root="weather11", port=8765)
 hc.connect()
 
 # Cities this feed is responsible for
