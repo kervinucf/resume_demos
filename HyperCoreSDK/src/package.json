@@ -7,6 +7,6 @@
     "start": "node relay.js"
   },
   "dependencies": {
-    "gun": "^0.2020.1240"
+    "gun": "^0.2020.1241"
   }
 }

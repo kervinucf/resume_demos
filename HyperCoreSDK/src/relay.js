@@ -1,8 +1,13 @@
 /**
- * Scene Relay — every machine runs one, they peer with each other.
+ * Scene Relay -- every machine runs one, they peer with each other.
  *
  * Browser always opens localhost. Gun syncs data across relays.
  * Shell HTML is generated with CDN-loaded Gun.
+ *
+ * PATCH: require('gun/sea') REMOVED.
+ * SEA's YSON parser crashes on non-JSON string values (JS source code,
+ * non-ASCII chars, \x escapes) during pack(). SEA is not needed server-side
+ * when auth/encryption is unused. Client-side SEA still loads via CDN.
  *
  * Env vars:
  *   PORT               (default 8765)
@@ -10,8 +15,8 @@
  *   HYPER_PEERS        (JSON array of Gun peer URLs)
  */
 
-const Gun = require('gun');
-require('gun/sea');
+const Gun = require('gun/gun');
+// require('gun/sea');  // REMOVED -- crashes YSON on JS strings
 const http = require('http');
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
@@ -132,12 +137,15 @@ function shellHTML(bucket) {
   var jsH={};
   live["root"]=root;
 
-  window.$gun=gun;
-  window.$scene=scene;
-  window.$root=root;
-  window.$bucket=bucket;
-
-  // ── action() — thin client HTTP bridge ──
+window.$gun = gun;
+window.$scene = scene;
+window.$root = root;
+window.$bucket = bucket;
+window.$peers = ALL_PEERS.map(function (u) {
+  u = String(u || "");
+  return u.endsWith("/gun") ? u.slice(0, -4) : u;
+});
+  // -- action() -- thin client HTTP bridge --
   window.action = function(payload) {
     return fetch('/' + bucket + '/action', {
       method: 'POST',
@@ -225,10 +233,10 @@ function shellHTML(bucket) {
     await renderR(dat,key,dat);
   }
 
-  // ── Real-time: Gun fires render on every change ──
+  // -- Real-time: Gun fires render on every change --
   scene.map().on(function(d,k){render(d,k)});
 
-  // ── Snapshot sync: reconcile ordering + clean ghosts ──
+  // -- Snapshot sync: reconcile ordering + clean ghosts --
   async function sync(){
     try{
       var r=await fetch('/'+bucket+'/api/snapshot',{cache:'no-store'});
@@ -237,7 +245,6 @@ function shellHTML(bucket) {
       var keys=Object.keys(snap).sort(function(a,b){return a.replace(/~/g,'/').split('/').length-b.replace(/~/g,'/').split('/').length});
       var w=new Set(keys);
       for(var i=0;i<keys.length;i++)await render(snap[keys[i]],keys[i]);
-      // Remove anything in the DOM that the relay doesn't know about (Gun ghosts)
       for(var k of Object.keys(live)){if(k==='root')continue;if(!w.has(k))cleanup(k)}
     }catch(e){console.warn('[sync]',e)}
   }
@@ -278,7 +285,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(shellHTML(bkt));
   }
 
-  // Action — browser POSTs here, relay stashes in snapshot + Gun
+  // Action -- browser POSTs here, relay stashes in snapshot + Gun
   if (action === 'action' && req.method === 'POST') {
     try {
       const raw = await readBody(req);
