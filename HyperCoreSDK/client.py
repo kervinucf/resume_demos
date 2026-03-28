@@ -45,7 +45,7 @@ def _mdns_ok():
 
 
 def _mdns_advertise(mid, port, root):
-    from zeroconf import Zeroconf, ServiceInfo
+    from zeroconf import ServiceInfo, Zeroconf
 
     ip = _local_ip()
     info = ServiceInfo(
@@ -72,7 +72,7 @@ def _mdns_stop(h):
 
 
 def _mdns_browse(timeout=3.0, own=""):
-    from zeroconf import Zeroconf, ServiceBrowser
+    from zeroconf import ServiceBrowser, Zeroconf
 
     found = []
 
@@ -84,9 +84,9 @@ def _mdns_browse(timeout=3.0, own=""):
             p = {k.decode(): v.decode() for k, v in (info.properties or {}).items()}
             if p.get("machine") == own:
                 return
-            a = info.parsed_addresses()
-            if a:
-                found.append(f"http://{a[0]}:{info.port}")
+            addrs = info.parsed_addresses()
+            if addrs:
+                found.append(f"http://{addrs[0]}:{info.port}")
 
         def remove_service(self, *a):
             pass
@@ -96,8 +96,8 @@ def _mdns_browse(timeout=3.0, own=""):
 
     zc = Zeroconf()
     ServiceBrowser(zc, MDNS_TYPE, L())
-    dl = time.time() + timeout
-    while time.time() < dl:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         if found:
             break
         time.sleep(0.1)
@@ -109,9 +109,9 @@ def _local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
-        a = s.getsockname()[0]
+        addr = s.getsockname()[0]
         s.close()
-        return a
+        return addr
     except Exception:
         return "127.0.0.1"
 
@@ -204,11 +204,7 @@ class _NodeRef:
     @property
     def path(self) -> str:
         return self._client.dot(self._path)
-    def tree(self):
-        return self._client.tree_path(self.path, full_path=True)
 
-    def search(self, q: str, limit: int = 50):
-        return self._client.search_path(self.path, q=q, limit=limit, full_path=True)
     def write(
         self,
         *,
@@ -252,6 +248,12 @@ class _NodeRef:
     def download(self) -> bytes:
         return self._client.download_path(self.path, full_path=True)
 
+    def tree(self):
+        return self._client.tree_path(self.path, full_path=True)
+
+    def search(self, q: str, limit: int = 50):
+        return self._client.search_path(self.path, q=q, limit=limit, full_path=True)
+
     def delete(self) -> bool:
         return self._client.delete_path(self.path, full_path=True)
 
@@ -285,19 +287,7 @@ class HyperClient:
         self.relay_url = relay_url.rstrip("/") if relay_url else f"http://127.0.0.1:{self.port}"
         self._explicit = [self._gun(p) for p in (peers or [])]
         self.peers: List[str] = []
-    def tree_url(self, path: str, full_path: bool = False) -> str:
-        return self.path_url(path, full_path=full_path) + ".tree"
 
-    def search_url(self, path: str, q: str, limit: int = 50, full_path: bool = False) -> str:
-        base = self.path_url(path, full_path=full_path) + ".search"
-        qs = urllib.parse.urlencode({"q": q, "limit": limit})
-        return base + "?" + qs
-
-    def tree_path(self, path: str, *, full_path: bool = False):
-        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
-
-    def search_path(self, path: str, q: str, limit: int = 50, *, full_path: bool = False):
-        return self._req_url(self.search_url(path, q=q, limit=limit, full_path=full_path), "GET")
     def connect(self):
         remote = self._discover()
         self.peers = self._build_peers(remote)
@@ -311,13 +301,13 @@ class HyperClient:
 
         self._register()
 
-        r = "peered" if remote else "standalone"
+        mode = "peered" if remote else "standalone"
         log.info("")
         log.info("━" * 50)
-        log.info("  %s · %s · %s", self.discovery, r, self.machine_id[:20])
+        log.info("  %s · %s · %s", self.discovery, mode, self.machine_id[:20])
         log.info("")
         log.info("  open in browser:")
-        log.info("  \033[1mhttp://localhost:%d/%s\033[0m", self.port, self.root)
+        log.info("  \033[1mhttp://localhost:%d/\033[0m", self.port)
         log.info("")
         if remote:
             log.info("  peered with: %s", remote)
@@ -355,6 +345,41 @@ class HyperClient:
     def at(self, path: str = "") -> _NodeRef:
         return _NodeRef(self, path)
 
+    def relay_info(self):
+        return self._req_url(f"{self.relay_url}/?json=1", "GET")
+
+    def admin_info(self):
+        return self._req_url(f"{self.relay_url}/_admin?json=1", "GET", auth=True)
+
+    def admin_set_peers(self, peers: List[str]):
+        return self._req_url(
+            f"{self.relay_url}/_admin/peers",
+            "POST",
+            data={"peers": peers},
+            auth=True,
+        )
+
+    def admin_set_config(self, *, bind: Optional[str] = None, port: Optional[int] = None):
+        body: Dict[str, Any] = {}
+        if bind is not None:
+            body["bind"] = bind
+        if port is not None:
+            body["port"] = int(port)
+        return self._req_url(
+            f"{self.relay_url}/_admin/config",
+            "POST",
+            data=body,
+            auth=True,
+        )
+
+    def admin_restart(self):
+        return self._req_url(
+            f"{self.relay_url}/_admin/restart",
+            "POST",
+            data={},
+            auth=True,
+        )
+
     def dot(self, path: str, full_path: bool = False) -> str:
         p = str(path or "").strip()
         if not p:
@@ -365,7 +390,7 @@ class HyperClient:
         if full_path or p == self.root or p.startswith(self.root + "."):
             return p
         if p.startswith("scene."):
-            p = p[len("scene."):]
+            p = p[len("scene.") :]
         return f"{self.root}.{p}"
 
     def path_url(self, path: str, full_path: bool = False) -> str:
@@ -381,25 +406,38 @@ class HyperClient:
     def download_url(self, path: str, full_path: bool = False) -> str:
         return self.path_url(path, full_path=full_path) + ".download"
 
+    def tree_url(self, path: str, full_path: bool = False) -> str:
+        return self.path_url(path, full_path=full_path) + ".tree"
+
+    def search_url(self, path: str, q: str, limit: int = 50, full_path: bool = False) -> str:
+        base = self.path_url(path, full_path=full_path) + ".search"
+        return base + "?" + urllib.parse.urlencode({"q": q, "limit": limit})
+
     def read_path(self, path: str, *, full_path: bool = False):
         return self._req_url(self.path_url(path, full_path=full_path), "GET")
 
     def write_path(self, path: str, payload: Dict[str, Any], *, full_path: bool = False) -> bool:
-        r = self._req_url(self.path_url(path, full_path=full_path), "PUT", data=payload, write=True)
-        return r is not None and (r.get("ok", False) if isinstance(r, dict) else True)
+        result = self._req_url(self.path_url(path, full_path=full_path), "PUT", data=payload, auth=True)
+        return result is not None and (result.get("ok", False) if isinstance(result, dict) else True)
 
     def delete_path(self, path: str, *, full_path: bool = False) -> bool:
-        return self._req_url(self.path_url(path, full_path=full_path), "DELETE", write=True) is not None
+        return self._req_url(self.path_url(path, full_path=full_path), "DELETE", auth=True) is not None
 
     def stream_path(self, path: str, *, full_path: bool = False, timeout: float = 3600.0) -> _SSESubscription:
         return _SSESubscription(self.events_url(path, full_path=full_path), timeout=timeout)
 
     def download_path(self, path: str, *, full_path: bool = False) -> bytes:
-        req = urllib.request.Request(self.download_url(path, full_path=full_path), method="GET", headers=self._h(False))
+        req = urllib.request.Request(self.download_url(path, full_path=full_path), method="GET", headers=self._headers(False))
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read()
 
-    # Back-compat sugar
+    def tree_path(self, path: str, *, full_path: bool = False):
+        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
+
+    def search_path(self, path: str, q: str, limit: int = 50, *, full_path: bool = False):
+        return self._req_url(self.search_url(path, q=q, limit=limit, full_path=full_path), "GET")
+
+    # Back-compat helpers
     def write(self, path, **fields):
         return self.write_path(path, fields)
 
@@ -455,9 +493,7 @@ class HyperClient:
             lines.append(f'  el_{trigger}.onclick={fn_name};')
 
             if submit:
-                lines.append(
-                    f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){fn_name}();}};'
-                )
+                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){{{fn_name}();}}}};')
 
         lines.append("})();")
         return "\n".join(lines)
@@ -521,8 +557,8 @@ class HyperClient:
 
     def _relay_probe_urls(self) -> List[str]:
         return [
+            f"http://127.0.0.1:{self.port}/?json=1",
             f"http://127.0.0.1:{self.port}/{self.root}",
-            f"http://127.0.0.1:{self.port}",
         ]
 
     def _relay_ready(self, timeout=1.0) -> bool:
@@ -555,9 +591,9 @@ class HyperClient:
         atexit.register(self.stop)
         self._wait()
 
-    def _h(self, write=False):
+    def _headers(self, auth=False):
         headers = {"Content-Type": "application/json"}
-        if write and self.token:
+        if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
@@ -565,25 +601,22 @@ class HyperClient:
         return self._req(p, "GET")
 
     def _post(self, p, d=None):
-        return self._req(p, "POST", d)
+        return self._req(p, "POST", d, auth=True)
 
-    def _req(self, path, method="GET", data=None, write=False):
-        return self._req_url(f"{self.base}/{path}", method=method, data=data, write=write)
+    def _req(self, path, method="GET", data=None, auth=False):
+        return self._req_url(f"{self.base}/{path}", method=method, data=data, auth=auth)
 
     def _decode_response(self, resp):
         raw = resp.read()
         if not raw:
             return {}
-
         ctype = (resp.headers.get("Content-Type") or "").lower()
         if "application/json" in ctype:
             return json.loads(raw)
-
         try:
             text = raw.decode("utf-8")
         except Exception:
             text = raw.decode("utf-8", "replace")
-
         if text and text[:1] in "[{":
             try:
                 return json.loads(text)
@@ -591,9 +624,9 @@ class HyperClient:
                 pass
         return text
 
-    def _req_url(self, url, method="GET", data=None, write=False):
+    def _req_url(self, url, method="GET", data=None, auth=False):
         body = json.dumps(data).encode() if data is not None else None
-        req = urllib.request.Request(url, data=body, method=method, headers=self._h(write))
+        req = urllib.request.Request(url, data=body, method=method, headers=self._headers(auth))
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return self._decode_response(resp)
@@ -625,8 +658,8 @@ class HyperClient:
             return False
 
     def _wait(self, timeout=10.0):
-        dl = time.time() + timeout
-        while time.time() < dl:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
                 raise RuntimeError(f"Relay exited early with code {self._proc.returncode}")
             if self._relay_ready(timeout=1.0):
