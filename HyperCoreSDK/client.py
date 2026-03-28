@@ -32,11 +32,11 @@ class Action(dict):
         super().__init__(fields)
         self.name = name
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Action({self.name!r}, {dict(self)})"
 
 
-def _mdns_ok():
+def _mdns_ok() -> bool:
     try:
         import zeroconf  # noqa: F401
         return True
@@ -44,7 +44,7 @@ def _mdns_ok():
         return False
 
 
-def _mdns_advertise(mid, port, root):
+def _mdns_advertise(mid: str, port: int, root: str):
     from zeroconf import ServiceInfo, Zeroconf
 
     ip = _local_ip()
@@ -61,7 +61,7 @@ def _mdns_advertise(mid, port, root):
     return zc, info
 
 
-def _mdns_stop(h):
+def _mdns_stop(h) -> None:
     if not h:
         return
     try:
@@ -71,31 +71,31 @@ def _mdns_stop(h):
         pass
 
 
-def _mdns_browse(timeout=3.0, own=""):
+def _mdns_browse(timeout: float = 3.0, own: str = "") -> List[str]:
     from zeroconf import ServiceBrowser, Zeroconf
 
-    found = []
+    found: List[str] = []
 
-    class L:
+    class Listener:
         def add_service(self, zc, st, name):
             info = zc.get_service_info(st, name)
             if not info:
                 return
-            p = {k.decode(): v.decode() for k, v in (info.properties or {}).items()}
-            if p.get("machine") == own:
+            props = {k.decode(): v.decode() for k, v in (info.properties or {}).items()}
+            if props.get("machine") == own:
                 return
             addrs = info.parsed_addresses()
             if addrs:
                 found.append(f"http://{addrs[0]}:{info.port}")
 
-        def remove_service(self, *a):
+        def remove_service(self, *args):
             pass
 
-        def update_service(self, *a):
+        def update_service(self, *args):
             pass
 
     zc = Zeroconf()
-    ServiceBrowser(zc, MDNS_TYPE, L())
+    ServiceBrowser(zc, MDNS_TYPE, Listener())
     deadline = time.time() + timeout
     while time.time() < deadline:
         if found:
@@ -105,7 +105,7 @@ def _mdns_browse(timeout=3.0, own=""):
     return found
 
 
-def _local_ip():
+def _local_ip() -> str:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -123,7 +123,7 @@ class _SSESubscription:
         self._resp = None
         self._closed = False
 
-    def close(self):
+    def close(self) -> None:
         self._closed = True
         if self._resp is not None:
             try:
@@ -158,7 +158,6 @@ class _SSESubscription:
                     break
 
                 text = line.decode("utf-8", "replace").rstrip("\r\n")
-
                 if text == "":
                     if data_lines:
                         raw = "\n".join(data_lines)
@@ -236,28 +235,10 @@ class _NodeRef:
     def stream(self, timeout: float = 3600.0) -> _SSESubscription:
         return self._client.stream_path(self.path, full_path=True, timeout=timeout)
 
-    def stream_url(self) -> str:
-        return self._client.stream_url(self.path, full_path=True)
-
-    def events_url(self) -> str:
-        return self._client.events_url(self.path, full_path=True)
-
-    def download_url(self) -> str:
-        return self._client.download_url(self.path, full_path=True)
-
-    def download(self) -> bytes:
-        return self._client.download_path(self.path, full_path=True)
-
-    def tree(self):
-        return self._client.tree_path(self.path, full_path=True)
-
-    def search(self, q: str, limit: int = 50):
-        return self._client.search_path(self.path, q=q, limit=limit, full_path=True)
-
     def delete(self) -> bool:
         return self._client.delete_path(self.path, full_path=True)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<NodeRef {self.path}>"
 
 
@@ -265,13 +246,13 @@ class HyperClient:
     def __init__(
         self,
         relay_url=None,
-        root="default",
-        token=None,
+        root: str = "default",
+        token: Optional[str] = None,
         relay_script=None,
-        discovery="local",
-        relay="auto",
+        discovery: str = "local",
+        relay: str = "auto",
         peers=None,
-        port=8765,
+        port: int = 8765,
         machine_name=None,
     ):
         self.root = root
@@ -288,7 +269,7 @@ class HyperClient:
         self._explicit = [self._gun(p) for p in (peers or [])]
         self.peers: List[str] = []
 
-    def connect(self):
+    def connect(self) -> None:
         remote = self._discover()
         self.peers = self._build_peers(remote)
         if self.relay_mode == "join" and not remote:
@@ -307,17 +288,14 @@ class HyperClient:
         log.info("  %s · %s · %s", self.discovery, mode, self.machine_id[:20])
         log.info("")
         log.info("  open in browser:")
-        log.info("  \033[1mhttp://localhost:%d/\033[0m", self.port)
+        log.info("  http://localhost:%d/", self.port)
         log.info("")
         if remote:
             log.info("  peered with: %s", remote)
         log.info("━" * 50)
         log.info("")
 
-    def start_relay(self):
-        self.connect()
-
-    def stop(self):
+    def stop(self) -> None:
         _mdns_stop(self._mdns)
         self._mdns = None
         if self._proc and self._proc.poll() is None:
@@ -327,58 +305,16 @@ class HyperClient:
                 pass
         self._proc = None
 
-    def stop_relay(self):
-        self.stop()
-
     @property
-    def base(self):
+    def base(self) -> str:
         return f"{self.relay_url}/{self.root}"
 
     @property
-    def gun_relay(self):
-        return f"{self.relay_url}/gun"
-
-    @property
-    def browser_url(self):
+    def browser_url(self) -> str:
         return f"http://localhost:{self.port}/{self.root}"
 
     def at(self, path: str = "") -> _NodeRef:
         return _NodeRef(self, path)
-
-    def relay_info(self):
-        return self._req_url(f"{self.relay_url}/?json=1", "GET")
-
-    def admin_info(self):
-        return self._req_url(f"{self.relay_url}/_admin?json=1", "GET", auth=True)
-
-    def admin_set_peers(self, peers: List[str]):
-        return self._req_url(
-            f"{self.relay_url}/_admin/peers",
-            "POST",
-            data={"peers": peers},
-            auth=True,
-        )
-
-    def admin_set_config(self, *, bind: Optional[str] = None, port: Optional[int] = None):
-        body: Dict[str, Any] = {}
-        if bind is not None:
-            body["bind"] = bind
-        if port is not None:
-            body["port"] = int(port)
-        return self._req_url(
-            f"{self.relay_url}/_admin/config",
-            "POST",
-            data=body,
-            auth=True,
-        )
-
-    def admin_restart(self):
-        return self._req_url(
-            f"{self.relay_url}/_admin/restart",
-            "POST",
-            data={},
-            auth=True,
-        )
 
     def dot(self, path: str, full_path: bool = False) -> str:
         p = str(path or "").strip()
@@ -389,78 +325,106 @@ class HyperClient:
         p = p.replace("/", ".")
         if full_path or p == self.root or p.startswith(self.root + "."):
             return p
-        if p.startswith("scene."):
-            p = p[len("scene.") :]
         return f"{self.root}.{p}"
 
     def path_url(self, path: str, full_path: bool = False) -> str:
         dp = self.dot(path, full_path=full_path)
         return f"{self.relay_url}/{urllib.parse.quote(dp, safe='.')}"
 
-    def stream_url(self, path: str, full_path: bool = False) -> str:
-        return self.path_url(path, full_path=full_path) + ".stream"
-
     def events_url(self, path: str, full_path: bool = False) -> str:
         return self.path_url(path, full_path=full_path) + ".events"
 
-    def download_url(self, path: str, full_path: bool = False) -> str:
-        return self.path_url(path, full_path=full_path) + ".download"
+    def stream_url(self, path: str, full_path: bool = False) -> str:
+        return self.path_url(path, full_path=full_path) + ".stream"
 
     def tree_url(self, path: str, full_path: bool = False) -> str:
         return self.path_url(path, full_path=full_path) + ".tree"
 
-    def search_url(self, path: str, q: str, limit: int = 50, full_path: bool = False) -> str:
-        base = self.path_url(path, full_path=full_path) + ".search"
-        return base + "?" + urllib.parse.urlencode({"q": q, "limit": limit})
+    def download_url(self, path: str, full_path: bool = False) -> str:
+        return self.path_url(path, full_path=full_path) + ".download"
 
     def read_path(self, path: str, *, full_path: bool = False):
         return self._req_url(self.path_url(path, full_path=full_path), "GET")
 
     def write_path(self, path: str, payload: Dict[str, Any], *, full_path: bool = False) -> bool:
-        result = self._req_url(self.path_url(path, full_path=full_path), "PUT", data=payload, auth=True)
+        result = self._req_url(
+            self.path_url(path, full_path=full_path),
+            "PUT",
+            data=payload,
+            auth=True,
+        )
         return result is not None and (result.get("ok", False) if isinstance(result, dict) else True)
 
     def delete_path(self, path: str, *, full_path: bool = False) -> bool:
         return self._req_url(self.path_url(path, full_path=full_path), "DELETE", auth=True) is not None
 
+    def tree_path(self, path: str, *, full_path: bool = False):
+        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
+
     def stream_path(self, path: str, *, full_path: bool = False, timeout: float = 3600.0) -> _SSESubscription:
         return _SSESubscription(self.events_url(path, full_path=full_path), timeout=timeout)
 
     def download_path(self, path: str, *, full_path: bool = False) -> bytes:
-        req = urllib.request.Request(self.download_url(path, full_path=full_path), method="GET", headers=self._headers(False))
+        req = urllib.request.Request(
+            self.download_url(path, full_path=full_path),
+            method="GET",
+            headers=self._headers(False),
+        )
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read()
 
-    def tree_path(self, path: str, *, full_path: bool = False):
-        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
+    # compatibility layer for older examples
+    def mount(
+        self,
+        path: str,
+        *,
+        html: Optional[str] = None,
+        css: Optional[str] = None,
+        js: Optional[str] = None,
+        fixed: bool = False,
+        layer: int = 0,
+        file: Any = None,
+        **extra: Any,
+    ) -> bool:
+        payload: Dict[str, Any] = {"fixed": fixed, "layer": layer}
+        if html is not None:
+            payload["html"] = html
+        if css is not None:
+            payload["css"] = css
+        if js is not None:
+            payload["js"] = js
+        if file is not None:
+            payload["file"] = self._normalize_file(file)
+        if extra:
+            payload.update(extra)
+        return self.write_path(path, payload)
 
-    def search_path(self, path: str, q: str, limit: int = 50, *, full_path: bool = False):
-        return self._req_url(self.search_url(path, q=q, limit=limit, full_path=full_path), "GET")
+    def unmount(self, path: str) -> bool:
+        return self.delete_path(path)
 
-    # Back-compat helpers
-    def write(self, path, **fields):
+    def write(self, path: str, **fields: Any) -> bool:
         return self.write_path(path, fields)
 
-    def read(self, path):
-        return self.read_path(path) or {}
+    def read(self, path: str):
+        return self.read_path(path)
 
-    def remove(self, path):
+    def remove(self, path: str) -> bool:
         return self.delete_path(path)
 
     def subscribe(self, path: str, *, full_path: bool = False, timeout: float = 3600.0) -> _SSESubscription:
         return self.stream_path(path, full_path=full_path, timeout=timeout)
 
-    def clear(self):
-        return self._post("api/clear") is not None
+    def clear(self) -> bool:
+        return self._req("api/clear", "POST", {}) is not None
 
     def snapshot(self):
-        return self._get("api/snapshot") or {}
+        return self._req("api/snapshot", "GET") or {}
 
     def keys(self):
-        return self._get("api/keys") or []
+        return self._req("api/keys", "GET") or []
 
     @staticmethod
-    def actions_js(**action_defs):
+    def actions_js(**action_defs: Dict[str, Any]) -> str:
         lines = ["(function(){"]
 
         all_ids = set()
@@ -493,7 +457,7 @@ class HyperClient:
             lines.append(f'  el_{trigger}.onclick={fn_name};')
 
             if submit:
-                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){{{fn_name}();}}}};')
+                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){{e.preventDefault();{fn_name}();}}}};')
 
         lines.append("})();")
         return "\n".join(lines)
@@ -503,28 +467,32 @@ class HyperClient:
         for key in list(snap):
             if not key.startswith("inbox/"):
                 continue
-            raw = snap[key].get("data", {})
-            msg = raw if isinstance(raw, dict) else {}
+            raw = (snap.get(key) or {}).get("data")
+            if raw is None:
+                self.remove(key)
+                continue
+            try:
+                msg = json.loads(raw) if isinstance(raw, str) else raw
+            except Exception:
+                msg = {}
+            if not isinstance(msg, dict):
+                msg = {}
             self.remove(key)
             name = msg.pop("_action", "unknown")
             yield Action(name, msg)
 
-    def _register(self):
-        self.at(f"_machines.{self.machine_id}.info").write(data={
-            "machine_id": self.machine_id,
-            "name": self.machine_name,
-            "discovery": self.discovery,
-            "peers": self.peers,
-            "t": time.time(),
-        })
+    def _register(self) -> None:
+        self.at(f"_machines.{self.machine_id}.info").write(
+            data={
+                "machine_id": self.machine_id,
+                "name": self.machine_name,
+                "discovery": self.discovery,
+                "peers": self.peers,
+                "t": time.time(),
+            }
+        )
 
-    def heartbeat(self):
-        self.at(f"_machines.{self.machine_id}.presence").write(data={
-            "status": "online",
-            "t": time.time(),
-        })
-
-    def _discover(self):
+    def _discover(self) -> List[str]:
         if self.discovery == "local":
             return []
         if self.discovery == "trusted":
@@ -540,34 +508,22 @@ class HyperClient:
         log.warning("zeroconf not installed — pip install zeroconf")
         return []
 
-    def _build_peers(self, remote):
+    def _build_peers(self, remote: List[str]) -> List[str]:
         peers = [f"http://127.0.0.1:{self.port}/gun"]
         if self.discovery in ("lan", "trusted"):
-            lp = f"http://{_local_ip()}:{self.port}/gun"
-            if lp not in peers:
-                peers.append(lp)
+            lan_peer = f"http://{_local_ip()}:{self.port}/gun"
+            if lan_peer not in peers:
+                peers.append(lan_peer)
         for base in remote:
             g = self._gun(base)
             if g not in peers:
                 peers.append(g)
-        for x in self._explicit:
-            if x not in peers:
-                peers.append(x)
+        for explicit in self._explicit:
+            if explicit not in peers:
+                peers.append(explicit)
         return peers
 
-    def _relay_probe_urls(self) -> List[str]:
-        return [
-            f"http://127.0.0.1:{self.port}/?json=1",
-            f"http://127.0.0.1:{self.port}/{self.root}",
-        ]
-
-    def _relay_ready(self, timeout=1.0) -> bool:
-        for url in self._relay_probe_urls():
-            if self._probe(url, timeout=timeout):
-                return True
-        return False
-
-    def _start_relay(self):
+    def _start_relay(self) -> None:
         if self._proc and self._proc.poll() is None:
             return
 
@@ -591,73 +547,60 @@ class HyperClient:
         atexit.register(self.stop)
         self._wait()
 
-    def _headers(self, auth=False):
+    def _relay_probe_urls(self) -> List[str]:
+        return [
+            f"http://127.0.0.1:{self.port}/?json=1",
+            f"http://127.0.0.1:{self.port}/{self.root}",
+        ]
+
+    def _relay_ready(self, timeout: float = 1.0) -> bool:
+        for url in self._relay_probe_urls():
+            if self._probe(url, timeout=timeout):
+                return True
+        return False
+
+    def _headers(self, auth: bool = False) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def _get(self, p):
-        return self._req(p, "GET")
-
-    def _post(self, p, d=None):
-        return self._req(p, "POST", d, auth=True)
-
-    def _req(self, path, method="GET", data=None, auth=False):
+    def _req(self, path: str, method: str = "GET", data: Any = None, auth: bool = False):
         return self._req_url(f"{self.base}/{path}", method=method, data=data, auth=auth)
 
-    def _decode_response(self, resp):
-        raw = resp.read()
-        if not raw:
-            return {}
-        ctype = (resp.headers.get("Content-Type") or "").lower()
-        if "application/json" in ctype:
-            return json.loads(raw)
-        try:
-            text = raw.decode("utf-8")
-        except Exception:
-            text = raw.decode("utf-8", "replace")
-        if text and text[:1] in "[{":
-            try:
-                return json.loads(text)
-            except Exception:
-                pass
-        return text
-
-    def _req_url(self, url, method="GET", data=None, auth=False):
+    def _req_url(self, url: str, method: str = "GET", data: Any = None, auth: bool = False):
         body = json.dumps(data).encode() if data is not None else None
         req = urllib.request.Request(url, data=body, method=method, headers=self._headers(auth))
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return self._decode_response(resp)
+                raw = resp.read()
+                if not raw:
+                    return {}
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                if "application/json" in ctype:
+                    return json.loads(raw)
+                text = raw.decode("utf-8", "replace")
+                try:
+                    return json.loads(text)
+                except Exception:
+                    return text
         except urllib.error.HTTPError as e:
-            try:
-                detail = e.read().decode("utf-8", "replace")
-            except Exception:
-                detail = str(e)
-            log.error("%s %s → HTTP %s %s", method, url, e.code, detail)
+            detail = e.read().decode("utf-8", "replace")
+            log.error("%s %s -> HTTP %s %s", method, url, e.code, detail)
             return None
         except Exception as e:
-            log.error("%s %s → %s", method, url, e)
+            log.error("%s %s -> %s", method, url, e)
             return None
 
-    def _probe(self, url, timeout=2.0):
+    def _probe(self, url: str, timeout: float = 2.0) -> bool:
         try:
             req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return 200 <= getattr(r, "status", 200) < 300
-        except Exception:
-            pass
-
-        try:
-            p = urllib.parse.urlparse(url)
-            s = socket.create_connection((p.hostname or "127.0.0.1", p.port or self.port), timeout=timeout)
-            s.close()
-            return True
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return 200 <= getattr(resp, "status", 200) < 300
         except Exception:
             return False
 
-    def _wait(self, timeout=10.0):
+    def _wait(self, timeout: float = 10.0) -> None:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self._proc is not None and self._proc.poll() is not None:
@@ -717,7 +660,7 @@ class HyperClient:
             "data": base64.b64encode(blob).decode("ascii"),
         }
 
-    def _find_node(self):
+    def _find_node(self) -> str:
         from shutil import which
 
         n = which("node")
@@ -733,12 +676,9 @@ class HyperClient:
         raise RuntimeError("node not found")
 
     @staticmethod
-    def _gun(u):
+    def _gun(u: str) -> str:
         u = u.rstrip("/")
         return u if u.endswith("/gun") else u + "/gun"
-
-    def __repr__(self):
-        return f"<HyperClient {self.relay_url}/{self.root} [{self.discovery}]>"
 
 
 __all__ = ["HyperClient", "Action"]
