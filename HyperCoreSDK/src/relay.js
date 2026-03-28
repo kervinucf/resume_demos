@@ -1,22 +1,15 @@
 /**
- * Scene Relay -- every machine runs one, they peer with each other.
+ * Scene Relay with EXHAUSTIVE DIAGNOSTICS
  *
- * Browser always opens localhost. Gun syncs data across relays.
- * Shell HTML is generated with CDN-loaded Gun.
- *
- * PATCH: require('gun/sea') REMOVED.
- * SEA's YSON parser crashes on non-JSON string values (JS source code,
- * non-ASCII chars, \x escapes) during pack(). SEA is not needed server-side
- * when auth/encryption is unused. Client-side SEA still loads via CDN.
- *
- * Env vars:
- *   PORT               (default 8765)
- *   HYPER_BIND_HOST    (default 0.0.0.0)
- *   HYPER_PEERS        (JSON array of Gun peer URLs)
+ * Diagnostics added:
+ * - Server: logs every WebSocket upgrade attempt
+ * - Server: logs Gun peer connections
+ * - Shell HTML: patches WebSocket BEFORE Gun loads
+ * - Shell HTML: monitors gun.on('in') immediately after Gun creation
+ * - Explorer: hooks into existing Gun instance
  */
 
-const Gun = require('gun/gun');
-// require('gun/sea');  // REMOVED -- crashes YSON on JS strings
+const Gun = require('gun');
 const http = require('http');
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
@@ -69,6 +62,7 @@ function updateSnapshot(b, key, data) {
   if (Object.keys(merged).length > 0) b.snapshot[key] = merged;
   else delete b.snapshot[key];
 }
+
 function deleteSnapshotPath(b, key) {
   delete b.snapshot[key];
   const pfx = key + '/';
@@ -78,13 +72,47 @@ function deleteSnapshotPath(b, key) {
 function nullOut(bkt, key) {
   const tomb = {};
   for (const f of ALL_FIELDS) tomb[f] = null;
-  gun.get(bkt).get('scene').get(key).put(tomb);
+  gunPut(bkt, key, tomb);
 }
 
 function nullOutDesc(bkt, snap, key) {
   nullOut(bkt, key);
   const pfx = key + '/';
   for (const k of Object.keys(snap)) { if (k.startsWith(pfx)) nullOut(bkt, k); }
+}
+
+function gunPut(bkt, scenePath, data) {
+  var soul = bkt + '/scene/' + scenePath;
+  var parentSoul = bkt + '/scene';
+  var state = Gun.state();
+
+  var node = { '_': { '#': soul, '>': {} } };
+  for (var k in data) {
+    if (k === '_') continue;
+    node[k] = data[k];
+    node['_']['>'][k] = state;
+  }
+
+  var parentNode = { '_': { '#': parentSoul, '>': {} } };
+  parentNode[scenePath] = { '#': soul };
+  parentNode['_']['>'][scenePath] = state;
+
+  var bktNode = { '_': { '#': bkt, '>': {} } };
+  bktNode['scene'] = { '#': parentSoul };
+  bktNode['_']['>']['scene'] = state;
+
+  var put = {};
+  put[soul] = node;
+  put[parentSoul] = parentNode;
+  put[bkt] = bktNode;
+
+  var msg = {
+    put: put,
+    '#': 'inject_' + Math.random().toString(36).slice(2, 11)
+  };
+
+  gun._.on('in', msg);
+  gun._.on('out', msg);
 }
 
 function checkAuth(bkt, req) {
@@ -104,7 +132,7 @@ function readBody(req) {
 }
 
 // ------------------------------------------------------------------
-// Shell HTML
+// Shell HTML — WebSocket monkey-patch BEFORE Gun loads
 // ------------------------------------------------------------------
 
 function shellHTML(bucket) {
@@ -116,9 +144,61 @@ function shellHTML(bucket) {
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${bucket}</title>
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"><\/script>
-<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"><\/script>
 <style>html,body,#scene{margin:0;padding:0;width:100vw;height:100vh;overflow:hidden;background:#000}#scene{position:relative}</style>
+
+<!-- DIAGNOSTIC: Patch WebSocket BEFORE Gun.js loads -->
+<script>
+(function(){
+  var _WS = window.WebSocket;
+  var _wc = 0;
+  window._wsLog = [];
+  window._wsInstances = [];
+
+  window.WebSocket = function(url, protocols) {
+    var id = ++_wc;
+    var entry = {id:id, url:url, state:'CONNECTING', msgs:0};
+    window._wsLog.push('[WS#'+id+'] NEW: '+url);
+    console.log('[WS#'+id+'] NEW:', url);
+
+    var ws = protocols ? new _WS(url, protocols) : new _WS(url);
+    window._wsInstances.push({id:id, ws:ws, url:url});
+
+    ws.addEventListener('open', function(){
+      entry.state = 'OPEN';
+      window._wsLog.push('[WS#'+id+'] OPEN');
+      console.log('[WS#'+id+'] OPEN');
+    });
+    ws.addEventListener('close', function(e){
+      entry.state = 'CLOSED';
+      window._wsLog.push('[WS#'+id+'] CLOSED code='+e.code+' reason='+e.reason);
+      console.log('[WS#'+id+'] CLOSED code='+e.code+' reason='+e.reason);
+    });
+    ws.addEventListener('error', function(e){
+      entry.state = 'ERROR';
+      window._wsLog.push('[WS#'+id+'] ERROR');
+      console.log('[WS#'+id+'] ERROR (check browser network tab for details)');
+    });
+    ws.addEventListener('message', function(e){
+      entry.msgs++;
+      if(entry.msgs <= 3 || entry.msgs % 500 === 0){
+        window._wsLog.push('[WS#'+id+'] MSG#'+entry.msgs+' len='+String(e.data).length);
+        console.log('[WS#'+id+'] MSG#'+entry.msgs+' len='+String(e.data).length, String(e.data).slice(0,150));
+      }
+    });
+
+    return ws;
+  };
+  window.WebSocket.prototype = _WS.prototype;
+  window.WebSocket.CONNECTING = 0;
+  window.WebSocket.OPEN = 1;
+  window.WebSocket.CLOSING = 2;
+  window.WebSocket.CLOSED = 3;
+
+  console.log('[DIAG] WebSocket patched BEFORE Gun loads');
+})();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"><\/script>
 </head>
 <body>
 <div id="scene"></div>
@@ -129,23 +209,48 @@ function shellHTML(bucket) {
   if(ALL_PEERS.indexOf(o)===-1) ALL_PEERS.unshift(o);
   var bucket=${JSON.stringify(bucket)};
 
+  console.log('[SHELL] Creating Gun with peers:', ALL_PEERS);
   var gun=Gun({peers:ALL_PEERS});
+
+  // DIAGNOSTIC: Monitor Gun inbound immediately
+  var gunInCount = 0;
+  gun.on('in', function(msg){
+    gunInCount++;
+    if(msg && msg.put && (gunInCount <= 10 || gunInCount % 100 === 0)){
+      console.log('[SHELL gun.on(in)] #'+gunInCount+' souls:', Object.keys(msg.put).slice(0,3));
+    }
+    this.to.next(msg);
+  });
+
+  var mapCount = 0;
   var scene=gun.get(bucket).get('scene');
+  scene.map().on(function(d,k){
+    mapCount++;
+    if(mapCount <= 10 || mapCount % 100 === 0){
+      console.log('[SHELL map().on] #'+mapCount+' key='+k);
+    }
+    render(d,k);
+  });
+
+  // Export for explorer
+  window.$gun = gun;
+  window.$scene = scene;
+  window.$gunInCount = function(){ return gunInCount; };
+  window.$mapCount = function(){ return mapCount; };
+
   var root=document.getElementById('scene');
   var live={};
   var AF=Object.getPrototypeOf(async function(){}).constructor;
   var jsH={};
   live["root"]=root;
 
-window.$gun = gun;
-window.$scene = scene;
 window.$root = root;
 window.$bucket = bucket;
 window.$peers = ALL_PEERS.map(function (u) {
   u = String(u || "");
   return u.endsWith("/gun") ? u.slice(0, -4) : u;
 });
-  // -- action() -- thin client HTTP bridge --
+
   window.action = function(payload) {
     return fetch('/' + bucket + '/action', {
       method: 'POST',
@@ -207,6 +312,8 @@ window.$peers = ALL_PEERS.map(function (u) {
 
   function qh(s){var h=0;for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return h}
 
+  function cleanN(d){if(!d)return null;var o={};for(var k in d){if(k==="_"||k==="#"||k===">")continue;if(d[k]!==null)o[k]=d[k]}return Object.keys(o).length?o:null}
+
   function bind(host,res){
     var nodes=host.querySelectorAll('[data-bind-text],[data-bind-html],[data-bind-style]');
     for(var i=0;i<nodes.length;i++){
@@ -233,11 +340,8 @@ window.$peers = ALL_PEERS.map(function (u) {
     await renderR(dat,key,dat);
   }
 
-  // -- Real-time: Gun fires render on every change --
-  scene.map().on(function(d,k){render(d,k)});
-
-  // -- Snapshot sync: reconcile ordering + clean ghosts --
-  async function sync(){
+  // Bootstrap: one-time snapshot fetch
+  async function bootstrap(){
     try{
       var r=await fetch('/'+bucket+'/api/snapshot',{cache:'no-store'});
       var snap=await r.json();
@@ -246,10 +350,18 @@ window.$peers = ALL_PEERS.map(function (u) {
       var w=new Set(keys);
       for(var i=0;i<keys.length;i++)await render(snap[keys[i]],keys[i]);
       for(var k of Object.keys(live)){if(k==='root')continue;if(!w.has(k))cleanup(k)}
-    }catch(e){console.warn('[sync]',e)}
+    }catch(e){console.warn('[bootstrap]',e)}
   }
 
-  (async function(){await sync();setInterval(sync,250)})();
+  bootstrap();
+
+  // DIAGNOSTIC: periodic status check
+  setInterval(function(){
+    var wsInfo = (window._wsInstances||[]).map(function(w){
+      return 'WS#'+w.id+'('+w.url.slice(-20)+'):'+['CONNECTING','OPEN','CLOSING','CLOSED'][w.ws.readyState];
+    });
+    console.log('[SHELL STATUS] gunIn='+gunInCount+' mapOn='+mapCount+' ws=['+wsInfo.join(', ')+']');
+  }, 5000);
 })();
 <\/script>
 </body>
@@ -285,7 +397,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(shellHTML(bkt));
   }
 
-  // Action -- browser POSTs here, relay stashes in snapshot + Gun
+  // Action
   if (action === 'action' && req.method === 'POST') {
     try {
       const raw = await readBody(req);
@@ -293,7 +405,7 @@ const server = http.createServer(async (req, res) => {
       const key = 'inbox/' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
       const node = { data: JSON.stringify(payload) };
       b.snapshot[key] = node;
-      gun.get(bkt).get('scene').get(key).put(node);
+      gunPut(bkt, key, node);
       return sendJson(res, { ok: true, key });
     } catch (e) {
       return sendJson(res, { error: e.message }, 400);
@@ -306,8 +418,8 @@ const server = http.createServer(async (req, res) => {
       if (!checkAuth(bkt, req)) return sendJson(res, { error: 'unauthorized' }, 401);
       try {
         const data = JSON.parse(await readBody(req));
-        gun.get(bkt).get('scene').get(rest).put(data);
         updateSnapshot(b, rest, data);
+        gunPut(bkt, rest, data);
         return sendJson(res, { ok: true, path: rest });
       } catch (e) { return sendJson(res, { error: e.message }, 400); }
     }
@@ -332,8 +444,8 @@ const server = http.createServer(async (req, res) => {
       const ct = req.headers['content-type'] || '';
       let html = raw;
       if (ct.includes('json')) { try { html = JSON.parse(raw).html || raw; } catch(e) {} }
-      gun.get(bkt).get('scene').get(rest).put({ html });
       updateSnapshot(b, rest, { html });
+      gunPut(bkt, rest, { html });
       res.writeHead(200, { 'Content-Type': 'text/html' });
       return res.end(html);
     }
@@ -362,7 +474,42 @@ const server = http.createServer(async (req, res) => {
   if (!res.headersSent) { res.writeHead(404); res.end('Not found'); }
 });
 
+// ------------------------------------------------------------------
+// DIAGNOSTIC: Log WebSocket upgrade events on the server
+// ------------------------------------------------------------------
+server.on('upgrade', function(req, socket, head) {
+  console.log('[SERVER WS UPGRADE] url=' + req.url + ' origin=' + (req.headers.origin || 'none') + ' from=' + socket.remoteAddress);
+});
+
 const gun = Gun({ peers: PEERS, web: server, radisk: true });
+
+// Monitor outbound
+gun.on('out', function(msg) {
+  if (msg.put) {
+    console.log('[RELAY MESH OUT] Broadcasting souls:', Object.keys(msg.put).slice(0, 3).join(', '));
+  }
+  this.to.next(msg);
+});
+
+// DIAGNOSTIC: Monitor inbound on server
+gun.on('in', function(msg) {
+  if (msg.put) {
+    console.log('[RELAY MESH IN] Received souls:', Object.keys(msg.put).slice(0, 3).join(', '));
+  }
+  this.to.next(msg);
+});
+
+// DIAGNOSTIC: Log Gun's internal peer state periodically
+setInterval(function() {
+  const peers = gun._.opt.peers || {};
+  const peerInfo = Object.keys(peers).map(function(url) {
+    const p = peers[url];
+    const wire = p && p.wire;
+    const state = wire ? (wire.readyState !== undefined ? wire.readyState : 'unknown') : 'no-wire';
+    return url.slice(-30) + ':' + state;
+  });
+  console.log('[RELAY PEERS] ' + peerInfo.join(' | '));
+}, 10000);
 
 server.listen(PORT, BIND, () => {
   console.log(`Relay: http://localhost:${PORT}`);

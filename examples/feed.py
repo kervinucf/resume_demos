@@ -281,3 +281,4 @@ while True:
     cycle += 1
     print("cycle", cycle, "| nodes:",
           len([k for k in (hc.snapshot() or {}) if k.startswith("data/")]))
+
