@@ -1,4 +1,27 @@
 #!/usr/bin/env python3
+"""
+Explorer — browse the hypergraph through the public API.
+
+No Gun internals in the browser.
+No scene.map().
+No wire listeners.
+No polling.
+
+Uses only:
+  GET /                      -> roots
+  GET /<path>                -> node
+  GET /<path>.tree           -> subtree structure
+  GET /<path>.search?q=...   -> indexed subtree search
+  GET /<path>.events         -> live invalidation
+  GET /<path>.stream         -> live preview
+
+Run:
+    python -m examples.explorer --app-root explorer --port 8766
+
+Then open:
+    http://localhost:8766/explorer
+"""
+
 import argparse
 import time
 from HyperCoreSDK.client import HyperClient
@@ -8,32 +31,138 @@ HTML = """
   #app {
     min-height: 100vh;
     box-sizing: border-box;
-    padding: 18px 20px 40px;
     background: #fff;
-    color: #000;
-    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #111;
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-  #app a:link { color: #2563eb; }
-  #app a:visited { color: #7c3aed; }
-  #app h1, #app h2, #app h3 { margin: 0 0 12px; font-weight: 600; }
+  #app * { box-sizing: border-box; }
+  #app a { color: #2563eb; text-decoration: none; }
+  #app a:hover { text-decoration: underline; }
+  #app .shell {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    min-height: 100vh;
+  }
+  #app .side {
+    border-right: 1px solid #e5e7eb;
+    padding: 16px;
+    overflow: auto;
+  }
+  #app .main {
+    padding: 18px 20px 40px;
+    overflow: auto;
+  }
+  #app h1, #app h2, #app h3 {
+    margin: 0 0 12px;
+    font-weight: 600;
+    color: #111827;
+  }
   #app h1 { font-size: 22px; }
-  #app h2 { font-size: 17px; margin-top: 20px; }
+  #app h2 { font-size: 16px; margin-top: 22px; }
+  #app h3 { font-size: 14px; margin-top: 16px; }
   #app p, #app ul, #app pre { margin: 0 0 14px; }
-  #app ul { padding-left: 20px; }
-  #app li { margin: 4px 0; }
+  #app .muted { color: #6b7280; }
   #app .crumbs { margin-bottom: 14px; }
-  #app .muted { color: #555; }
+  #app .live {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #22c55e;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  #app .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  #app .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    font-size: 12px;
+  }
+  #app .box {
+    border: 1px solid #e5e7eb;
+    background: #fafafa;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+  }
   #app pre {
     white-space: pre-wrap;
     word-break: break-word;
     padding: 12px;
-    border: 1px solid #ddd;
+    border: 1px solid #e5e7eb;
     background: #fafafa;
+    border-radius: 8px;
     overflow: auto;
   }
-  #app .section { margin-top: 18px; }
+  #app ul.tree,
+  #app ul.links,
+  #app ul.results,
+  #app ul.roots {
+    list-style: none;
+    padding-left: 0;
+    margin-left: 0;
+  }
+  #app ul.tree ul {
+    list-style: none;
+    padding-left: 16px;
+    margin: 4px 0 0;
+    border-left: 1px dashed #e5e7eb;
+  }
+  #app li.node {
+    margin: 3px 0;
+  }
+  #app li.node .self {
+    font-weight: 600;
+  }
+  #app .selected {
+    background: #eff6ff;
+    border-radius: 6px;
+    padding: 2px 6px;
+  }
+  #app form.search {
+    display: flex;
+    gap: 8px;
+    margin: 10px 0 14px;
+  }
+  #app input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font: inherit;
+  }
+  #app button {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+  }
+  #app button:hover { background: #f9fafb; }
+  #app iframe.preview {
+    width: 100%;
+    min-height: 280px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
+  }
 </style>
-<div id="app">loading...</div>
+
+<div id="app">
+  <div class="shell">
+    <aside class="side" id="side"></aside>
+    <main class="main" id="main"></main>
+  </div>
+</div>
 """
 
 JS = r"""
@@ -42,48 +171,21 @@ JS = r"""
   if (!app || app.dataset.on) return;
   app.dataset.on = "1";
 
-  var renderQueued = false;
-  var keysPoll = null;
-  var nodePoll = null;
+  var side = document.getElementById("side");
+  var main = document.getElementById("main");
 
-  var view = {
-    peer: "",
-    bucket: "",
+  var state = {
+    roots: [],
+    root: "",
     path: "",
-    keys: [],
-    keysLoaded: false,
+    q: "",
+    rootMeta: null,
+    tree: null,
     node: null,
-    nodeLoaded: false,
-    keysSig: "",
-    nodeSig: ""
+    search: null,
+    es: null,
+    loading: false,
   };
-
-  function queueRender() {
-    if (renderQueued) return;
-    renderQueued = true;
-    requestAnimationFrame(function () {
-      renderQueued = false;
-      renderCurrentView();
-    });
-  }
-
-  function uniq(xs) {
-    var out = [], seen = {};
-    for (var i = 0; i < xs.length; i++) {
-      var x = String(xs[i] || "").replace(/\/$/, "");
-      if (!x || seen[x]) continue;
-      seen[x] = 1;
-      out.push(x);
-    }
-    return out;
-  }
-
-  function peers() {
-    var xs = [];
-    if (Array.isArray(window.$peers)) xs = xs.concat(window.$peers);
-    xs.push(location.origin);
-    return uniq(xs);
-  }
 
   function esc(x) {
     return String(x == null ? "" : x)
@@ -93,454 +195,353 @@ JS = r"""
       .replace(/"/g, "&quot;");
   }
 
-  function parts(path) {
-    return String(path || "").split("/").filter(Boolean);
+  function pathJoin(root, rel) {
+    if (!root) return rel || "";
+    if (!rel) return root;
+    return root + "." + rel;
   }
 
-  function join(parts) {
-    return parts.filter(Boolean).join("/");
+  function relFromAbs(root, abs) {
+    if (!root) return abs || "";
+    if (abs === root) return "";
+    return abs.indexOf(root + ".") === 0 ? abs.slice(root.length + 1) : abs;
   }
 
-  function encPath(path) {
-    return parts(path).map(encodeURIComponent).join("/");
+  function encPath(abs) {
+    return encodeURIComponent(abs);
   }
 
   function parseHash() {
     var q = new URLSearchParams(location.hash.replace(/^#/, ""));
     return {
-      peer: q.get("peer") || "",
-      bucket: q.get("bucket") || "",
-      path: q.get("path") || ""
+      root: q.get("root") || "",
+      path: q.get("path") || "",
+      q: q.get("q") || "",
     };
   }
 
-  function makeHash(st) {
+  function setHash(next) {
     var q = new URLSearchParams();
-    if (st.peer) q.set("peer", st.peer);
-    if (st.bucket) q.set("bucket", st.bucket);
-    if (st.path) q.set("path", st.path);
-    return "#" + q.toString();
+    if (next.root) q.set("root", next.root);
+    if (next.path) q.set("path", next.path);
+    if (next.q) q.set("q", next.q);
+    location.hash = "#" + q.toString();
   }
 
-  function a(label, st) {
-    return '<a href="' + makeHash(st) + '">' + esc(label) + "</a>";
+  function absolutePath() {
+    return pathJoin(state.root, state.path);
   }
 
-  async function getJSON(url) {
-    var r = await fetch(url, { cache: "no-store" });
-    if (!r.ok) throw new Error(url + " -> HTTP " + r.status);
-    return await r.json();
-  }
-
-  function parentPath(path) {
-    var p = parts(path);
-    if (!p.length) return "";
-    p.pop();
-    return join(p);
-  }
-
-  function crumbs(st) {
-    var out = [];
-    out.push(a("peers", {}));
-    if (st.peer) out.push(" / " + a(st.peer, { peer: st.peer }));
-    if (st.bucket) out.push(" / " + a(st.bucket, { peer: st.peer, bucket: st.bucket }));
-    if (st.path) {
-      var p = parts(st.path), acc = [];
-      for (var i = 0; i < p.length; i++) {
-        acc.push(p[i]);
-        out.push(" / " + a(p[i], {
-          peer: st.peer,
-          bucket: st.bucket,
-          path: join(acc)
-        }));
+  function fetchJSON(url) {
+    return fetch(url, { cache: "no-store" }).then(async function (r) {
+      if (!r.ok) {
+        var text = await r.text().catch(function () { return ""; });
+        throw new Error(url + " -> HTTP " + r.status + " " + text);
       }
-    }
-    return out.join("");
+      return r.json();
+    });
   }
 
-  function exact(keys, path) {
-    if (!path) return false;
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i] === path) return true;
+  function closeStream() {
+    if (state.es) {
+      try { state.es.close(); } catch (_) {}
+      state.es = null;
     }
-    return false;
   }
 
-  function children(keys, prefix) {
-    var out = {};
-    var pref = prefix ? prefix + "/" : "";
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      if (prefix) {
-        if (k !== prefix && k.indexOf(pref) !== 0) continue;
-      }
-      var rest = prefix ? (k === prefix ? "" : k.slice(pref.length)) : k;
-      if (!rest) continue;
-      var head = rest.split("/")[0];
-      var full = prefix ? prefix + "/" + head : head;
-      out[full] = 1;
-    }
-    return Object.keys(out).sort();
+  function openStream() {
+    closeStream();
+    if (!state.root) return;
+
+    var scope = absolutePath() || state.root;
+    state.es = new EventSource("/" + encPath(scope) + ".events");
+
+    state.es.addEventListener("snapshot", refreshCurrent);
+    state.es.addEventListener("update", refreshCurrent);
+    state.es.onerror = function () {};
   }
 
-  function normalizeLinks(node, st) {
+  function refreshRoots() {
+    return fetchJSON("/").then(function (meta) {
+      state.rootMeta = meta;
+      state.roots = Array.isArray(meta.buckets) ? meta.buckets : [];
+    }).catch(function () {
+      state.rootMeta = null;
+      state.roots = [];
+    });
+  }
+
+  function refreshCurrent() {
+    if (!state.root) {
+      render();
+      return Promise.resolve();
+    }
+
+    var abs = absolutePath() || state.root;
+    var jobs = [
+      fetchJSON("/" + encPath(state.root) + ".tree").then(function (x) { state.tree = x; }).catch(function () { state.tree = null; }),
+      fetchJSON("/" + encPath(abs)).then(function (x) { state.node = x; }).catch(function () { state.node = null; }),
+    ];
+
+    if (state.q) {
+      jobs.push(
+        fetchJSON("/" + encPath(abs) + ".search?q=" + encodeURIComponent(state.q))
+          .then(function (x) { state.search = x; })
+          .catch(function () { state.search = { results: [] }; })
+      );
+    } else {
+      state.search = null;
+    }
+
+    return Promise.all(jobs).then(render);
+  }
+
+  function normalizeNodeLinks(node) {
     if (!node || !node.links) return [];
     var raw = node.links;
-
     if (typeof raw === "string") {
       try { raw = JSON.parse(raw); } catch (_) { raw = []; }
     }
     if (!Array.isArray(raw)) return [];
-
-    var out = [];
-    for (var i = 0; i < raw.length; i++) {
-      var it = raw[i];
-
-      if (typeof it === "string") {
-        out.push({
-          label: it,
-          peer: st.peer,
-          bucket: st.bucket,
-          path: it
-        });
-        continue;
-      }
-
-      if (!it || !it.path) continue;
-
-      out.push({
-        label: it.label || it.rel || it.path,
-        peer: it.peer || st.peer,
-        bucket: it.bucket || st.bucket,
-        path: it.path
-      });
-    }
-    return out;
+    return raw.filter(Boolean);
   }
 
-  async function peerBuckets(peer) {
-    try {
-      var meta = await getJSON(peer + "/");
-      return Array.isArray(meta.buckets) ? meta.buckets.slice().sort() : [];
-    } catch (_) {
-      return [];
-    }
-  }
+  function crumbs() {
+    var out = ['<a href="#"></a>'];
+    out[0] = '<a href="#">roots</a>';
 
-  function sig(x) {
-    try { return JSON.stringify(x); }
-    catch (_) { return String(Math.random()); }
-  }
-
-  function stopPolls() {
-    if (keysPoll) clearInterval(keysPoll);
-    if (nodePoll) clearInterval(nodePoll);
-    keysPoll = null;
-    nodePoll = null;
-  }
-
-  async function refreshKeys(peer, bucket) {
-    try {
-      var keys = await getJSON(peer + "/" + encodeURIComponent(bucket) + "/api/keys");
-      var st = parseHash();
-      if (st.peer !== peer || st.bucket !== bucket) return;
-
-      var next = Array.isArray(keys) ? keys.slice().sort() : [];
-      var nextSig = sig(next);
-      if (nextSig !== view.keysSig) {
-        view.keys = next;
-        view.keysSig = nextSig;
-        view.keysLoaded = true;
-        queueRender();
-      } else if (!view.keysLoaded) {
-        view.keys = next;
-        view.keysLoaded = true;
-        queueRender();
-      }
-    } catch (_) {}
-  }
-
-  async function refreshNode(peer, bucket, path) {
-    var st = parseHash();
-    if (st.peer !== peer || st.bucket !== bucket || st.path !== path) return;
-
-    if (!path) {
-      if (view.node !== null || !view.nodeLoaded) {
-        view.node = null;
-        view.nodeSig = "null";
-        view.nodeLoaded = true;
-        queueRender();
-      }
-      return;
+    if (state.root) {
+      out.push(" / ");
+      out.push('<a href="' + "#root=" + encodeURIComponent(state.root) + '">' + esc(state.root) + '</a>');
     }
 
-    try {
-      var node = await getJSON(
-        peer + "/" + encodeURIComponent(bucket) + "/scene/" + encPath(path)
-      );
-      var st2 = parseHash();
-      if (st2.peer !== peer || st2.bucket !== bucket || st2.path !== path) return;
-
-      var nextSig = sig(node);
-      if (nextSig !== view.nodeSig) {
-        view.node = node;
-        view.nodeSig = nextSig;
-        view.nodeLoaded = true;
-        queueRender();
-      } else if (!view.nodeLoaded) {
-        view.node = node;
-        view.nodeLoaded = true;
-        queueRender();
+    if (state.path) {
+      var parts = state.path.split(".");
+      var acc = [];
+      for (var i = 0; i < parts.length; i++) {
+        acc.push(parts[i]);
+        out.push(" / ");
+        out.push('<a href="' + "#root=" + encodeURIComponent(state.root) + "&path=" + encodeURIComponent(acc.join(".")) + (state.q ? "&q=" + encodeURIComponent(state.q) : "") + '">' + esc(parts[i]) + '</a>');
       }
-    } catch (_) {}
-  }
-
-  function startPolls(peer, bucket, path) {
-    stopPolls();
-
-    refreshKeys(peer, bucket);
-    refreshNode(peer, bucket, path);
-
-    keysPoll = setInterval(function () {
-      refreshKeys(peer, bucket);
-    }, 2000);
-
-    nodePoll = setInterval(function () {
-      refreshNode(peer, bucket, path);
-    }, 500);
-  }
-
-  async function renderHome() {
-    var xs = peers();
-    var currentBucket = window.$bucket || "";
-    var rows = await Promise.all(xs.map(async function (peer) {
-      var buckets = await peerBuckets(peer);
-      return { peer: peer, buckets: buckets };
-    }));
-
-    var html = "<div class='crumbs'>" + crumbs({}) + "</div>";
-    html += "<h1>Peers</h1>";
-
-    if (currentBucket) {
-      html += "<p class='muted'>Current bucket: <strong>" + esc(currentBucket) + "</strong></p>";
     }
 
-    html += "<ul>";
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i];
-      html += "<li>";
-      html += a(row.peer, { peer: row.peer });
+    return out.join("");
+  }
 
-      if (currentBucket && row.buckets.indexOf(currentBucket) !== -1) {
-        html += " — " + a(currentBucket, { peer: row.peer, bucket: currentBucket });
-      } else if (row.buckets.length) {
-        html += " <span class='muted'>(" + row.buckets.length + " buckets)</span>";
+  function renderTreeNode(node) {
+    if (!node) return "";
+    var rel = relFromAbs(state.root, node.path);
+    var selected = (rel === state.path) ? " selected" : "";
+    var label = rel || state.root;
+    var href = "#root=" + encodeURIComponent(state.root) +
+      (rel ? "&path=" + encodeURIComponent(rel) : "") +
+      (state.q ? "&q=" + encodeURIComponent(state.q) : "");
+
+    var html = '<li class="node">' +
+      '<a class="' + (selected ? "selected self" : "") + '" href="' + href + '">' +
+      esc(label) +
+      '</a>' +
+      (node.type ? ' <span class="muted">(' + esc(node.type) + ')</span>' : '');
+
+    if (Array.isArray(node.children) && node.children.length) {
+      html += '<ul>';
+      for (var i = 0; i < node.children.length; i++) {
+        html += renderTreeNode(node.children[i]);
+      }
+      html += '</ul>';
+    }
+
+    html += '</li>';
+    return html;
+  }
+
+  function renderSide() {
+    var html = "<h2>Roots</h2>";
+    html += '<ul class="roots">';
+    if (!state.roots.length) {
+      html += '<li class="muted">No roots</li>';
+    } else {
+      for (var i = 0; i < state.roots.length; i++) {
+        var r = state.roots[i];
+        html += '<li><a href="#root=' + encodeURIComponent(r) + '">' + esc(r) + '</a></li>';
+      }
+    }
+    html += "</ul>";
+
+    if (state.root) {
+      html += "<h2>Tree</h2>";
+      if (state.tree && state.tree.tree) {
+        html += '<ul class="tree">' + renderTreeNode(state.tree.tree) + '</ul>';
       } else {
-        html += " <span class='muted'>(unreachable or empty)</span>";
+        html += '<p class="muted">No tree loaded.</p>';
       }
-
-      html += "</li>";
     }
-    html += "</ul>";
 
-    app.innerHTML = html;
+    side.innerHTML = html;
   }
 
-  async function renderBuckets(st) {
-    var buckets = await peerBuckets(st.peer);
-    var html = "<div class='crumbs'>" + crumbs(st) + "</div>";
-    html += "<h1>" + esc(st.peer) + "</h1>";
-    html += "<ul>";
+  function renderMain() {
+    var html = '<div class="crumbs">' + crumbs() + '</div>';
 
-    for (var i = 0; i < buckets.length; i++) {
-      html += "<li>" + a(buckets[i], {
-        peer: st.peer,
-        bucket: buckets[i]
-      }) + "</li>";
-    }
-
-    html += "</ul>";
-    app.innerHTML = html;
-  }
-
-  function renderCurrentView() {
-    var st = {
-      peer: view.peer,
-      bucket: view.bucket,
-      path: view.path
-    };
-
-    if (!st.peer) {
-      renderHome();
+    if (!state.root) {
+      html += '<h1>Hypergraph Explorer</h1>';
+      html += '<p class="muted">Choose a root from the left.</p>';
+      main.innerHTML = html;
       return;
     }
 
-    if (!st.bucket) {
-      renderBuckets(st);
-      return;
-    }
+    var abs = absolutePath() || state.root;
 
-    var keys = view.keys || [];
-    var path = st.path || "";
-    var kids = children(keys, path);
-    var isNode = exact(keys, path);
+    html += '<div class="row">';
+    html += '<h1><span class="live"></span>' + esc(abs) + '</h1>';
+    html += '<span class="pill">api</span>';
+    html += '</div>';
 
-    var html = "<div class='crumbs'>" + crumbs(st) + "</div>";
-    html += "<p>" + a("..", {
-      peer: st.peer,
-      bucket: st.bucket,
-      path: parentPath(path)
-    }) + "</p>";
+    html += '<div class="box">';
+    html += '<div><strong>self</strong>: <a target="_blank" href="/' + encPath(abs) + '">/' + esc(abs) + '</a></div>';
+    html += '<div><strong>tree</strong>: <a target="_blank" href="/' + encPath(abs) + '.tree">/' + esc(abs) + '.tree</a></div>';
+    html += '<div><strong>events</strong>: <a target="_blank" href="/' + encPath(abs) + '.events">/' + esc(abs) + '.events</a></div>';
+    html += '<div><strong>stream</strong>: <a target="_blank" href="/' + encPath(abs) + '.stream">/' + esc(abs) + '.stream</a></div>';
+    html += '</div>';
 
-    html += "<h1>" + esc(path || "/") + "</h1>";
+    html += '<form class="search" id="search-form">';
+    html += '<input id="search-input" type="text" placeholder="search this subtree" value="' + esc(state.q) + '"/>';
+    html += '<button type="submit">Search</button>';
+    html += '<button type="button" id="clear-search">Clear</button>';
+    html += '</form>';
 
-    if (!view.keysLoaded) {
-      html += "<p class='muted'>Loading…</p>";
-      app.innerHTML = html;
-      return;
-    }
-
-    if (kids.length) {
-      html += "<div class='section'><h2>Children</h2><ul>";
-      for (var i = 0; i < kids.length; i++) {
-        var child = kids[i];
-        var label = parts(child).slice(-1)[0];
-        html += "<li>" + a(label, {
-          peer: st.peer,
-          bucket: st.bucket,
-          path: child
-        }) + "</li>";
+    if (state.search) {
+      html += '<h2>Search</h2>';
+      if (state.search.results && state.search.results.length) {
+        html += '<ul class="results">';
+        for (var i = 0; i < state.search.results.length; i++) {
+          var it = state.search.results[i];
+          var rel = relFromAbs(state.root, it.path);
+          var href = "#root=" + encodeURIComponent(state.root) +
+            (rel ? "&path=" + encodeURIComponent(rel) : "");
+          html += '<li>';
+          html += '<a href="' + href + '">' + esc(it.path) + '</a>';
+          html += ' <span class="muted">[' + esc(it.match || "") + ']</span>';
+          if (it.excerpt) html += '<div class="muted">' + esc(it.excerpt) + '</div>';
+          html += '</li>';
+        }
+        html += '</ul>';
+      } else {
+        html += '<p class="muted">No matches.</p>';
       }
-      html += "</ul></div>";
     }
 
-    if (!isNode) {
-      html += "<p class='muted'>No node at this path.</p>";
-      app.innerHTML = html;
-      return;
-    }
+    html += '<h2>Node</h2>';
+    if (!state.node) {
+      html += '<p class="muted">No node or branch metadata found.</p>';
+    } else {
+      html += '<pre>' + esc(JSON.stringify(state.node, null, 2)) + '</pre>';
 
-    if (!view.nodeLoaded) {
-      html += "<p class='muted'>Loading node…</p>";
-      app.innerHTML = html;
-      return;
-    }
-
-    if (!view.node) {
-      html += "<p class='muted'>Node is empty or missing.</p>";
-      app.innerHTML = html;
-      return;
-    }
-
-    var node = view.node;
-
-    html += "<div class='section'><h2>Node</h2>";
-    html += "<pre>" + esc(JSON.stringify(node, null, 2)) + "</pre></div>";
-
-    var links = normalizeLinks(node, st);
-    if (links.length) {
-      html += "<div class='section'><h2>Links</h2><ul>";
-      for (var j = 0; j < links.length; j++) {
-        var it = links[j];
-        html += "<li>" + a(it.label, {
-          peer: it.peer,
-          bucket: it.bucket,
-          path: it.path
-        }) + "</li>";
-      }
-      html += "</ul></div>";
-    }
-
-    if (node.html) {
-      html += "<div class='section'><h2>Rendered HTML</h2>";
-      html += "<div data-rendered-html>" + String(node.html) + "</div>";
-      html += "</div>";
-    }
-
-    app.innerHTML = html;
-  }
-
-  app.addEventListener("click", function (e) {
-    var el = e.target.closest("[data-rendered-html] a");
-    if (!el) return;
-
-    var st = parseHash();
-    var href = String(el.getAttribute("href") || "").trim();
-
-    if (href && href !== "#") {
-      if (href.charAt(0) === "#") {
-        e.preventDefault();
-        location.hash = href;
-        return;
-      }
-
-      if (!/^(https?:|mailto:|tel:|javascript:)/i.test(href)) {
-        e.preventDefault();
-        location.hash = makeHash({
-          peer: st.peer,
-          bucket: st.bucket,
-          path: href.replace(/^\/+/, "")
+      var apiLinks = state.node._links || null;
+      if (apiLinks && typeof apiLinks === "object") {
+        html += '<h2>API Links</h2><ul class="links">';
+        Object.keys(apiLinks).forEach(function (k) {
+          html += '<li><strong>' + esc(k) + '</strong>: <a target="_blank" href="' + esc(apiLinks[k]) + '">' + esc(apiLinks[k]) + '</a></li>';
         });
-        return;
+        html += '</ul>';
       }
 
-      return;
+      var semanticLinks = normalizeNodeLinks(state.node);
+      if (semanticLinks.length) {
+        html += '<h2>Links</h2><ul class="links">';
+        for (var j = 0; j < semanticLinks.length; j++) {
+          var link = semanticLinks[j];
+          var target = link.path || "";
+          var rel = relFromAbs(state.root, target);
+          var href = "#root=" + encodeURIComponent(state.root) +
+            (rel ? "&path=" + encodeURIComponent(rel) : "");
+          html += '<li><a href="' + href + '">' + esc(link.label || link.rel || target) + '</a>';
+          if (link.path) html += ' <span class="muted">(' + esc(link.path) + ')</span>';
+          html += '</li>';
+        }
+        html += '</ul>';
+      }
+
+      if (state.node.html != null) {
+        html += '<h2>Live Preview</h2>';
+        html += '<iframe class="preview" src="/' + encPath(abs) + '.stream"></iframe>';
+      }
+
+      if (state.node.file && state.node._links && state.node._links.download) {
+        html += '<h2>File</h2>';
+        html += '<p><a target="_blank" href="' + esc(state.node._links.download) + '">download</a></p>';
+      }
     }
 
-    var path = String(el.getAttribute("data-path") || el.textContent || "").trim();
-    if (!path) return;
+    main.innerHTML = html;
 
-    e.preventDefault();
-    location.hash = makeHash({
-      peer: st.peer,
-      bucket: st.bucket,
-      path: path
-    });
-  });
-
-  async function route() {
-    var st = parseHash();
-
-    view.peer = st.peer;
-    view.bucket = st.bucket;
-    view.path = st.path;
-    view.keys = [];
-    view.keysLoaded = false;
-    view.node = null;
-    view.nodeLoaded = false;
-    view.keysSig = "";
-    view.nodeSig = "";
-
-    if (!st.peer) {
-      stopPolls();
-      view.keysLoaded = true;
-      view.nodeLoaded = true;
-      renderCurrentView();
-      return;
+    var form = document.getElementById("search-form");
+    if (form) {
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        var input = document.getElementById("search-input");
+        setHash({ root: state.root, path: state.path, q: input.value.trim() });
+      };
     }
 
-    if (!st.bucket) {
-      stopPolls();
-      view.keysLoaded = true;
-      view.nodeLoaded = true;
-      renderCurrentView();
-      return;
+    var clear = document.getElementById("clear-search");
+    if (clear) {
+      clear.onclick = function () {
+        setHash({ root: state.root, path: state.path, q: "" });
+      };
     }
+  }
 
-    renderCurrentView();
-    startPolls(st.peer, st.bucket, st.path);
+  function render() {
+    renderSide();
+    renderMain();
+  }
+
+  function route() {
+    var next = parseHash();
+
+    var changed =
+      next.root !== state.root ||
+      next.path !== state.path ||
+      next.q !== state.q;
+
+    state.root = next.root;
+    state.path = next.path;
+    state.q = next.q;
+
+    if (!changed) return;
+
+    refreshRoots()
+      .then(refreshCurrent)
+      .then(openStream)
+      .then(render)
+      .catch(function (err) {
+        console.error("[explorer]", err);
+        render();
+      });
   }
 
   window.addEventListener("hashchange", route);
-  route();
+
+  refreshRoots()
+    .then(function () {
+      var h = parseHash();
+      if (!h.root && state.roots.length) {
+        setHash({ root: state.roots[0], path: "", q: "" });
+        return;
+      }
+      route();
+    })
+    .catch(route);
 })();
 """
+
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--app-root", default="explorer")
     p.add_argument("--discovery", default="local")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=int, default=8766)
     p.add_argument("--peer", action="append", default=[])
     a = p.parse_args()
 
@@ -552,11 +553,18 @@ def main():
     )
     hc.connect()
 
-    hc.mount("root/x", html=HTML, js=JS, fixed=True, layer=9999)
+    hc.at("root.x").write(
+        html=HTML,
+        js=JS,
+        fixed=True,
+        layer=9999,
+    )
+
     print("Explorer:", hc.browser_url)
 
     while True:
         time.sleep(60)
+
 
 if __name__ == "__main__":
     main()
