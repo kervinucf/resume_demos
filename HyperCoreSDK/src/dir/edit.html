@@ -1,15 +1,9 @@
 <!doctype html>
 <html>
 <body>
-<pre id="out"></pre>
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-<script>
-  const gun = Gun({ peers: ['http://localhost:8766/gun'] });
-  const out = document.getElementById('out');
-
-  gun.get('demo3').get('scene').get('weather/nyc').get('data').get('temp').on((v) => {
-    out.textContent = String(v);
-  });
-</script>
+<iframe
+  style="width:100%;height:220px;border:1px solid #999"
+  src="http://127.0.0.1:8766/demo111.weather.nyc.panel.stream?city=%24demo111.weather.nyc.data.city&temp=%24demo111.weather.nyc.data.temp&cond=%24demo111.weather.nyc.data.cond&units=%C2%B0F&note=%24demo111.weather.nyc.data.temp&_v=5">
+</iframe>
 </body>
 </html>

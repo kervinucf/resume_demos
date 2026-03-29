@@ -32,11 +32,15 @@ class Action(dict):
         super().__init__(fields)
         self.name = name
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return f"Action({self.name!r}, {dict(self)})"
 
 
-def _mdns_ok() -> bool:
+class LiveBind(str):
+    pass
+
+
+def _mdns_ok():
     try:
         import zeroconf  # noqa: F401
         return True
@@ -44,7 +48,7 @@ def _mdns_ok() -> bool:
         return False
 
 
-def _mdns_advertise(mid: str, port: int, root: str):
+def _mdns_advertise(mid, port, root):
     from zeroconf import ServiceInfo, Zeroconf
 
     ip = _local_ip()
@@ -61,7 +65,7 @@ def _mdns_advertise(mid: str, port: int, root: str):
     return zc, info
 
 
-def _mdns_stop(h) -> None:
+def _mdns_stop(h):
     if not h:
         return
     try:
@@ -71,31 +75,31 @@ def _mdns_stop(h) -> None:
         pass
 
 
-def _mdns_browse(timeout: float = 3.0, own: str = "") -> List[str]:
+def _mdns_browse(timeout=3.0, own=""):
     from zeroconf import ServiceBrowser, Zeroconf
 
-    found: List[str] = []
+    found = []
 
-    class Listener:
+    class L:
         def add_service(self, zc, st, name):
             info = zc.get_service_info(st, name)
             if not info:
                 return
-            props = {k.decode(): v.decode() for k, v in (info.properties or {}).items()}
-            if props.get("machine") == own:
+            p = {k.decode(): v.decode() for k, v in (info.properties or {}).items()}
+            if p.get("machine") == own:
                 return
             addrs = info.parsed_addresses()
             if addrs:
                 found.append(f"http://{addrs[0]}:{info.port}")
 
-        def remove_service(self, *args):
+        def remove_service(self, *a):
             pass
 
-        def update_service(self, *args):
+        def update_service(self, *a):
             pass
 
     zc = Zeroconf()
-    ServiceBrowser(zc, MDNS_TYPE, Listener())
+    ServiceBrowser(zc, MDNS_TYPE, L())
     deadline = time.time() + timeout
     while time.time() < deadline:
         if found:
@@ -105,7 +109,7 @@ def _mdns_browse(timeout: float = 3.0, own: str = "") -> List[str]:
     return found
 
 
-def _local_ip() -> str:
+def _local_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -123,7 +127,7 @@ class _SSESubscription:
         self._resp = None
         self._closed = False
 
-    def close(self) -> None:
+    def close(self):
         self._closed = True
         if self._resp is not None:
             try:
@@ -158,6 +162,7 @@ class _SSESubscription:
                     break
 
                 text = line.decode("utf-8", "replace").rstrip("\r\n")
+
                 if text == "":
                     if data_lines:
                         raw = "\n".join(data_lines)
@@ -235,6 +240,29 @@ class _NodeRef:
     def stream(self, timeout: float = 3600.0) -> _SSESubscription:
         return self._client.stream_path(self.path, full_path=True, timeout=timeout)
 
+    def stream_url(self, params: Optional[Dict[str, Any]] = None) -> str:
+        if params:
+            return self._client.render_url(self.path, params=params, full_path=True)
+        return self._client.stream_url(self.path, full_path=True)
+
+    def render_url(self, params: Optional[Dict[str, Any]] = None) -> str:
+        return self._client.render_url(self.path, params=params, full_path=True)
+
+    def events_url(self, params: Optional[Dict[str, Any]] = None) -> str:
+        return self._client.events_url(self.path, params=params, full_path=True)
+
+    def download_url(self) -> str:
+        return self._client.download_url(self.path, full_path=True)
+
+    def download(self) -> bytes:
+        return self._client.download_path(self.path, full_path=True)
+
+    def tree(self):
+        return self._client.tree_path(self.path, full_path=True)
+
+    def search(self, q: str, limit: int = 50):
+        return self._client.search_path(self.path, q=q, limit=limit, full_path=True)
+
     def delete(self) -> bool:
         return self._client.delete_path(self.path, full_path=True)
 
@@ -246,13 +274,13 @@ class HyperClient:
     def __init__(
         self,
         relay_url=None,
-        root: str = "default",
-        token: Optional[str] = None,
+        root="default",
+        token=None,
         relay_script=None,
-        discovery: str = "local",
-        relay: str = "auto",
+        discovery="local",
+        relay="auto",
         peers=None,
-        port: int = 8765,
+        port=8765,
         machine_name=None,
     ):
         self.root = root
@@ -269,7 +297,7 @@ class HyperClient:
         self._explicit = [self._gun(p) for p in (peers or [])]
         self.peers: List[str] = []
 
-    def connect(self) -> None:
+    def connect(self):
         remote = self._discover()
         self.peers = self._build_peers(remote)
         if self.relay_mode == "join" and not remote:
@@ -280,22 +308,23 @@ class HyperClient:
         if self.discovery == "lan" and _mdns_ok():
             self._mdns = _mdns_advertise(self.machine_id, self.port, self.root)
 
-        self._register()
-
         mode = "peered" if remote else "standalone"
         log.info("")
         log.info("━" * 50)
         log.info("  %s · %s · %s", self.discovery, mode, self.machine_id[:20])
         log.info("")
         log.info("  open in browser:")
-        log.info("  http://localhost:%d/", self.port)
+        log.info("  \033[1mhttp://localhost:%d/\033[0m", self.port)
         log.info("")
         if remote:
             log.info("  peered with: %s", remote)
         log.info("━" * 50)
         log.info("")
 
-    def stop(self) -> None:
+    def start_relay(self):
+        self.connect()
+
+    def stop(self):
         _mdns_stop(self._mdns)
         self._mdns = None
         if self._proc and self._proc.poll() is None:
@@ -305,16 +334,29 @@ class HyperClient:
                 pass
         self._proc = None
 
+    def stop_relay(self):
+        self.stop()
+
     @property
-    def base(self) -> str:
+    def base(self):
         return f"{self.relay_url}/{self.root}"
 
     @property
-    def browser_url(self) -> str:
+    def gun_relay(self):
+        return f"{self.relay_url}/gun"
+
+    @property
+    def browser_url(self):
         return f"http://localhost:{self.port}/{self.root}"
 
     def at(self, path: str = "") -> _NodeRef:
         return _NodeRef(self, path)
+
+    def bind(self, path: str, *, full_path: bool = False) -> LiveBind:
+        return LiveBind(f"${self.dot(path, full_path=full_path)}")
+
+    def object_bind(self, path: str, *, full_path: bool = False) -> LiveBind:
+        return LiveBind(f"@{self.dot(path, full_path=full_path)}")
 
     def dot(self, path: str, full_path: bool = False) -> str:
         p = str(path or "").strip()
@@ -325,108 +367,89 @@ class HyperClient:
         p = p.replace("/", ".")
         if full_path or p == self.root or p.startswith(self.root + "."):
             return p
+        if p.startswith("scene."):
+            p = p[len("scene."):]
         return f"{self.root}.{p}"
 
     def path_url(self, path: str, full_path: bool = False) -> str:
         dp = self.dot(path, full_path=full_path)
         return f"{self.relay_url}/{urllib.parse.quote(dp, safe='.')}"
 
-    def events_url(self, path: str, full_path: bool = False) -> str:
-        return self.path_url(path, full_path=full_path) + ".events"
-
     def stream_url(self, path: str, full_path: bool = False) -> str:
         return self.path_url(path, full_path=full_path) + ".stream"
+
+    def render_url(self, path: str, params: Optional[Dict[str, Any]] = None, *, full_path: bool = False) -> str:
+        base = self.stream_url(path, full_path=full_path)
+        if not params:
+            return base
+        enc = urllib.parse.urlencode(self._encode_params(params), doseq=True)
+        return base if not enc else f"{base}?{enc}"
+
+    def events_url(self, path: str, params: Optional[Dict[str, Any]] = None, *, full_path: bool = False) -> str:
+        base = self.path_url(path, full_path=full_path) + ".events"
+        if not params:
+            return base
+        enc = urllib.parse.urlencode(self._encode_params(params), doseq=True)
+        return base if not enc else f"{base}?{enc}"
+
+    def download_url(self, path: str, full_path: bool = False) -> str:
+        return self.path_url(path, full_path=full_path) + ".download"
 
     def tree_url(self, path: str, full_path: bool = False) -> str:
         return self.path_url(path, full_path=full_path) + ".tree"
 
-    def download_url(self, path: str, full_path: bool = False) -> str:
-        return self.path_url(path, full_path=full_path) + ".download"
+    def search_url(self, path: str, q: str, limit: int = 50, full_path: bool = False) -> str:
+        base = self.path_url(path, full_path=full_path) + ".search"
+        return base + "?" + urllib.parse.urlencode({"q": q, "limit": limit})
 
     def read_path(self, path: str, *, full_path: bool = False):
         return self._req_url(self.path_url(path, full_path=full_path), "GET")
 
     def write_path(self, path: str, payload: Dict[str, Any], *, full_path: bool = False) -> bool:
-        result = self._req_url(
-            self.path_url(path, full_path=full_path),
-            "PUT",
-            data=payload,
-            auth=True,
-        )
+        result = self._req_url(self.path_url(path, full_path=full_path), "PUT", data=payload)
         return result is not None and (result.get("ok", False) if isinstance(result, dict) else True)
 
     def delete_path(self, path: str, *, full_path: bool = False) -> bool:
-        return self._req_url(self.path_url(path, full_path=full_path), "DELETE", auth=True) is not None
-
-    def tree_path(self, path: str, *, full_path: bool = False):
-        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
+        return self._req_url(self.path_url(path, full_path=full_path), "DELETE") is not None
 
     def stream_path(self, path: str, *, full_path: bool = False, timeout: float = 3600.0) -> _SSESubscription:
         return _SSESubscription(self.events_url(path, full_path=full_path), timeout=timeout)
 
     def download_path(self, path: str, *, full_path: bool = False) -> bytes:
-        req = urllib.request.Request(
-            self.download_url(path, full_path=full_path),
-            method="GET",
-            headers=self._headers(False),
-        )
+        req = urllib.request.Request(self.download_url(path, full_path=full_path), method="GET", headers=self._headers(False))
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read()
 
-    # compatibility layer for older examples
-    def mount(
-        self,
-        path: str,
-        *,
-        html: Optional[str] = None,
-        css: Optional[str] = None,
-        js: Optional[str] = None,
-        fixed: bool = False,
-        layer: int = 0,
-        file: Any = None,
-        **extra: Any,
-    ) -> bool:
-        payload: Dict[str, Any] = {"fixed": fixed, "layer": layer}
-        if html is not None:
-            payload["html"] = html
-        if css is not None:
-            payload["css"] = css
-        if js is not None:
-            payload["js"] = js
-        if file is not None:
-            payload["file"] = self._normalize_file(file)
-        if extra:
-            payload.update(extra)
-        return self.write_path(path, payload)
+    def tree_path(self, path: str, *, full_path: bool = False):
+        return self._req_url(self.tree_url(path, full_path=full_path), "GET")
 
-    def unmount(self, path: str) -> bool:
-        return self.delete_path(path)
+    def search_path(self, path: str, q: str, limit: int = 50, *, full_path: bool = False):
+        return self._req_url(self.search_url(path, q=q, limit=limit, full_path=full_path), "GET")
 
-    def write(self, path: str, **fields: Any) -> bool:
+    def write(self, path, **fields):
         return self.write_path(path, fields)
 
-    def read(self, path: str):
-        return self.read_path(path)
+    def read(self, path):
+        return self.read_path(path) or {}
 
-    def remove(self, path: str) -> bool:
+    def remove(self, path):
         return self.delete_path(path)
 
     def subscribe(self, path: str, *, full_path: bool = False, timeout: float = 3600.0) -> _SSESubscription:
         return self.stream_path(path, full_path=full_path, timeout=timeout)
 
-    def clear(self) -> bool:
-        return self._req("api/clear", "POST", {}) is not None
+    def clear(self):
+        return False
 
     def snapshot(self):
-        return self._req("api/snapshot", "GET") or {}
+        return {}
 
     def keys(self):
-        return self._req("api/keys", "GET") or []
+        return []
 
     @staticmethod
-    def actions_js(**action_defs: Dict[str, Any]) -> str:
+    def actions_js(**action_defs):
         lines = ["(function(){"]
-
         all_ids = set()
         for _name, defn in action_defs.items():
             for fid in defn.get("fields", []):
@@ -434,7 +457,6 @@ class HyperClient:
             all_ids.add(defn["trigger"])
 
         guard_id = list(action_defs.values())[0]["trigger"]
-
         for eid in sorted(all_ids):
             lines.append(f'  var el_{eid}=document.getElementById("{eid}");')
         lines.append(f'  if(!el_{guard_id}||el_{guard_id}.dataset.on)return;')
@@ -453,46 +475,37 @@ class HyperClient:
             lines.append(f'    action({{_action:"{name}",{field_reads}}});')
             if submit:
                 lines.append(f'    el_{submit}.value="";')
-            lines.append("  }")
+            lines.append('  }')
             lines.append(f'  el_{trigger}.onclick={fn_name};')
-
             if submit:
-                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){{e.preventDefault();{fn_name}();}}}};')
+                lines.append(f'  el_{submit}.onkeydown=function(e){{if(e.key==="Enter"){{{fn_name}();}}}};')
 
         lines.append("})();")
         return "\n".join(lines)
 
     def actions(self):
-        snap = self.snapshot()
-        for key in list(snap):
-            if not key.startswith("inbox/"):
-                continue
-            raw = (snap.get(key) or {}).get("data")
-            if raw is None:
-                self.remove(key)
-                continue
-            try:
-                msg = json.loads(raw) if isinstance(raw, str) else raw
-            except Exception:
-                msg = {}
-            if not isinstance(msg, dict):
-                msg = {}
-            self.remove(key)
-            name = msg.pop("_action", "unknown")
-            yield Action(name, msg)
+        return []
 
-    def _register(self) -> None:
-        self.at(f"_machines.{self.machine_id}.info").write(
-            data={
-                "machine_id": self.machine_id,
-                "name": self.machine_name,
-                "discovery": self.discovery,
-                "peers": self.peers,
-                "t": time.time(),
-            }
-        )
+    def mount(self, key, *, html="", css="", js="", fixed=False, layer=0, data=None, **kw):
+        payload = {"html": html, "css": css, "js": js, "fixed": fixed, "layer": layer, **kw}
+        if data is not None:
+            payload["data"] = data
+        return self.write_path(key, payload)
 
-    def _discover(self) -> List[str]:
+    def _encode_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for k, v in (params or {}).items():
+            if isinstance(v, LiveBind):
+                out[k] = str(v)
+            elif isinstance(v, (dict, list, tuple, bool, int, float)):
+                out[k] = json.dumps(v)
+            elif v is None:
+                out[k] = ""
+            else:
+                out[k] = str(v)
+        return out
+
+    def _discover(self):
         if self.discovery == "local":
             return []
         if self.discovery == "trusted":
@@ -508,177 +521,117 @@ class HyperClient:
         log.warning("zeroconf not installed — pip install zeroconf")
         return []
 
-    def _build_peers(self, remote: List[str]) -> List[str]:
+    def _build_peers(self, remote):
         peers = [f"http://127.0.0.1:{self.port}/gun"]
         if self.discovery in ("lan", "trusted"):
-            lan_peer = f"http://{_local_ip()}:{self.port}/gun"
-            if lan_peer not in peers:
-                peers.append(lan_peer)
+            local_peer = f"http://{_local_ip()}:{self.port}/gun"
+            if local_peer not in peers:
+                peers.append(local_peer)
         for base in remote:
-            g = self._gun(base)
-            if g not in peers:
-                peers.append(g)
+            gun_peer = self._gun(base)
+            if gun_peer not in peers:
+                peers.append(gun_peer)
         for explicit in self._explicit:
             if explicit not in peers:
                 peers.append(explicit)
         return peers
 
-    def _start_relay(self) -> None:
+    def _start_relay(self):
         if self._proc and self._proc.poll() is None:
             return
-
-        if self._relay_ready(timeout=0.75):
-            log.info("relay already running on port %d; reusing it", self.port)
-            self._proc = None
-            return
-
         env = os.environ.copy()
         env["PORT"] = str(self.port)
         env["HYPER_BIND_HOST"] = "127.0.0.1" if self.discovery == "local" else "0.0.0.0"
         env["HYPER_PEERS"] = json.dumps(self.peers)
-
         self._proc = subprocess.Popen(
             [self._find_node(), str(self._relay_script)],
             stdout=sys.stdout,
             stderr=sys.stderr,
             env=env,
         )
-
         atexit.register(self.stop)
         self._wait()
 
-    def _relay_probe_urls(self) -> List[str]:
-        return [
-            f"http://127.0.0.1:{self.port}/?json=1",
-            f"http://127.0.0.1:{self.port}/{self.root}",
-        ]
+    def _wait(self):
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            if self._proc and self._proc.poll() is not None:
+                raise RuntimeError(f"Relay exited early with code {self._proc.returncode}")
+            try:
+                self._req_url(f"{self.relay_url}/?json=1", "GET")
+                return
+            except Exception:
+                time.sleep(0.1)
+        raise RuntimeError("Timed out waiting for relay")
 
-    def _relay_ready(self, timeout: float = 1.0) -> bool:
-        for url in self._relay_probe_urls():
-            if self._probe(url, timeout=timeout):
-                return True
-        return False
+    def _find_node(self):
+        for name in ("node", "nodejs"):
+            path = shutil.which(name) if 'shutil' in globals() else None
+            if path:
+                return path
+        # delayed import so module still loads in limited envs
+        import shutil
+        for name in ("node", "nodejs"):
+            path = shutil.which(name)
+            if path:
+                return path
+        raise RuntimeError("Node.js not found on PATH")
 
-    def _headers(self, auth: bool = False) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
+    def _gun(self, base: str) -> str:
+        b = str(base or "").rstrip("/")
+        return b if b.endswith("/gun") else b + "/gun"
+
+    def _headers(self, auth=False):
+        headers = {"Accept": "application/json"}
         if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
 
-    def _req(self, path: str, method: str = "GET", data: Any = None, auth: bool = False):
-        return self._req_url(f"{self.base}/{path}", method=method, data=data, auth=auth)
+    def _normalize_file(self, file: Any):
+        if file is None:
+            return None
+        if isinstance(file, (bytes, bytearray)):
+            return {
+                "name": "upload.bin",
+                "type": "application/octet-stream",
+                "encoding": "base64",
+                "data": base64.b64encode(bytes(file)).decode("ascii"),
+            }
+        if isinstance(file, str) and os.path.exists(file):
+            data = Path(file).read_bytes()
+            mime = mimetypes.guess_type(file)[0] or "application/octet-stream"
+            return {
+                "name": Path(file).name,
+                "type": mime,
+                "encoding": "base64",
+                "data": base64.b64encode(data).decode("ascii"),
+            }
+        return file
 
-    def _req_url(self, url: str, method: str = "GET", data: Any = None, auth: bool = False):
-        body = json.dumps(data).encode() if data is not None else None
-        req = urllib.request.Request(url, data=body, method=method, headers=self._headers(auth))
+    def _req_url(self, url: str, method: str, data: Optional[Dict[str, Any]] = None, auth: bool = False):
+        body = None
+        headers = self._headers(auth)
+        if data is not None:
+            body = json.dumps(data).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, method=method, data=body, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                raw = resp.read()
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read().decode("utf-8", "replace")
                 if not raw:
-                    return {}
-                ctype = (resp.headers.get("Content-Type") or "").lower()
+                    return None
+                ctype = resp.headers.get("Content-Type", "")
                 if "application/json" in ctype:
                     return json.loads(raw)
-                text = raw.decode("utf-8", "replace")
                 try:
-                    return json.loads(text)
+                    return json.loads(raw)
                 except Exception:
-                    return text
+                    return raw
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")
-            log.error("%s %s -> HTTP %s %s", method, url, e.code, detail)
-            return None
-        except Exception as e:
-            log.error("%s %s -> %s", method, url, e)
-            return None
+            raw = e.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = raw
+            raise RuntimeError(f"HTTP {e.code}: {payload}") from e
 
-    def _probe(self, url: str, timeout: float = 2.0) -> bool:
-        try:
-            req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return 200 <= getattr(resp, "status", 200) < 300
-        except Exception:
-            return False
-
-    def _wait(self, timeout: float = 10.0) -> None:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self._proc is not None and self._proc.poll() is not None:
-                raise RuntimeError(f"Relay exited early with code {self._proc.returncode}")
-            if self._relay_ready(timeout=1.0):
-                return
-            time.sleep(0.3)
-        raise RuntimeError(f"Relay not ready after {timeout}s")
-
-    def _normalize_file(self, file: Any) -> Dict[str, Any]:
-        if isinstance(file, dict):
-            return file
-        if isinstance(file, Path):
-            return self._file_from_path(file)
-        if isinstance(file, bytes):
-            return {
-                "name": "download.bin",
-                "type": "application/octet-stream",
-                "encoding": "base64",
-                "data": base64.b64encode(file).decode("ascii"),
-            }
-        if hasattr(file, "read"):
-            content = file.read()
-            name = getattr(file, "name", "download.bin")
-            if isinstance(content, str):
-                return {
-                    "name": Path(str(name)).name,
-                    "type": "text/plain; charset=utf-8",
-                    "encoding": "utf8",
-                    "data": content,
-                }
-            return {
-                "name": Path(str(name)).name,
-                "type": "application/octet-stream",
-                "encoding": "base64",
-                "data": base64.b64encode(content).decode("ascii"),
-            }
-        if isinstance(file, str):
-            p = Path(file)
-            if p.exists() and p.is_file():
-                return self._file_from_path(p)
-            return {
-                "name": "download.txt",
-                "type": "text/plain; charset=utf-8",
-                "encoding": "utf8",
-                "data": file,
-            }
-        raise TypeError(f"Unsupported file payload: {type(file)!r}")
-
-    def _file_from_path(self, path: Path) -> Dict[str, Any]:
-        blob = path.read_bytes()
-        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        return {
-            "name": path.name,
-            "type": ctype,
-            "encoding": "base64",
-            "data": base64.b64encode(blob).decode("ascii"),
-        }
-
-    def _find_node(self) -> str:
-        from shutil import which
-
-        n = which("node")
-        if n:
-            return n
-        for p in (
-            "/opt/homebrew/bin/node",
-            "/usr/local/bin/node",
-            "C:/Program Files/nodejs/node.exe",
-        ):
-            if Path(p).exists():
-                return p
-        raise RuntimeError("node not found")
-
-    @staticmethod
-    def _gun(u: str) -> str:
-        u = u.rstrip("/")
-        return u if u.endswith("/gun") else u + "/gun"
-
-
-__all__ = ["HyperClient", "Action"]

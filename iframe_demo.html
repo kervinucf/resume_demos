@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HyperCore iframe demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; }
+    iframe { width: 380px; height: 220px; border: 1px solid #ddd; border-radius: 12px; }
+    code { background: #f6f8fa; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Intentional .stream iframe demo</h1>
+  <p>
+    This assumes a component exists at
+    <code>demo3.weather.nyc.panel</code>
+    and binds against <code>theme</code>, <code>units</code>, and <code>temp</code>.
+  </p>
+
+  <iframe
+    src="http://localhost:8766/demo3.weather.nyc.panel.stream?theme=compact&units=f&temp=$demo3.weather.nyc.temp">
+  </iframe>
+</body>
+</html>
