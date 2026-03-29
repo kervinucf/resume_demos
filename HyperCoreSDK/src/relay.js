@@ -18,8 +18,6 @@ try { PEERS = JSON.parse(process.env.HYPER_PEERS || '[]'); } catch (_) { PEERS =
 const graph = Object.create(null);
 const localMsgIds = new Set();
 const seenPutIds = new Map();
-const sseClients = new Set();
-let nextEventId = 1;
 let gun;
 
 function log(tag, ...args) {
@@ -114,8 +112,7 @@ function buildResponse(dp, origin) {
   const node = nodeForRead(getNode(dp));
   const links = {
     self: pathURL(origin, dp),
-    stream: pathURL(origin, dp, '.stream'),
-    events: pathURL(origin, dp, '.events'),
+    stream: pathURL(origin, dp, '.stream')
   };
 
   const parent = parentOf(dp);
@@ -275,50 +272,6 @@ function alreadySeenPut(id) {
   return !!id && seenPutIds.has(id);
 }
 
-function impactsPath(mutatedDp, subPath) {
-  return mutatedDp === subPath || mutatedDp.startsWith(subPath + '.') || subPath.startsWith(mutatedDp + '.');
-}
-
-function sendSSE(res, eventName, payload) {
-  const id = nextEventId++;
-  res.write('id: ' + id + '\n');
-  res.write('event: ' + eventName + '\n');
-  const text = JSON.stringify(payload);
-  for (const line of text.split('\n')) res.write('data: ' + line + '\n');
-  res.write('\n');
-}
-
-function emitResolved(client, eventName = 'update') {
-  const resolved = resolve(client.path, client.origin);
-  if (!resolved) {
-    sendSSE(client.res, eventName, { path: client.path, kind: 'missing', data: null });
-    return;
-  }
-  sendSSE(client.res, eventName, { path: client.path, kind: resolved.type, data: resolved.data });
-}
-
-function notifyImpacted(mutatedDp) {
-  for (const client of Array.from(sseClients)) {
-    if (!impactsPath(mutatedDp, client.path)) continue;
-    try {
-      emitResolved(client, 'update');
-    } catch (_) {
-      try { client.res.end(); } catch (_) {}
-      sseClients.delete(client);
-    }
-  }
-}
-
-setInterval(function () {
-  for (const client of Array.from(sseClients)) {
-    try { client.res.write(': ping\n\n'); }
-    catch (_) {
-      try { client.res.end(); } catch (_) {}
-      sseClients.delete(client);
-    }
-  }
-}, 25000);
-
 function ingestPutMessage(msg) {
   if (!msg || !msg.put) return;
   const msgId = msg['#'] || null;
@@ -331,7 +284,6 @@ function ingestPutMessage(msg) {
     const clean = cleanGunNode(msg.put[soul], msg.put);
     if (!clean || !Object.keys(clean).length) continue;
     mergeNode(dp, clean);
-    notifyImpacted(dp);
   }
 }
 
@@ -358,7 +310,6 @@ function normalizeBindPath(raw) {
   if (v.startsWith('$')) v = v.slice(1);
   if (v.startsWith('/')) v = v.slice(1).replace(/\//g, '.');
   if (v.endsWith('.stream')) v = v.slice(0, -7);
-  if (v.endsWith('.events')) v = v.slice(0, -7);
   return v;
 }
 
@@ -387,7 +338,6 @@ function resolveTargetInfo(rawPath) {
   if (h !== -1) raw = raw.slice(0, h);
 
   if (raw.endsWith('.stream')) raw = raw.slice(0, -7);
-  if (raw.endsWith('.events')) raw = raw.slice(0, -7);
 
   const parts = raw.split('.').filter(Boolean);
   if (!parts.length) {
@@ -397,8 +347,6 @@ function resolveTargetInfo(rawPath) {
   const root = parts[0];
   const rest = parts.slice(1);
 
-  // In this graph model, these are field namespaces on a node,
-  // not additional scene segments.
   const FIELD_NAMES = new Set([
     'data',
     'html',
@@ -425,6 +373,7 @@ function resolveTargetInfo(rawPath) {
     fieldPath
   };
 }
+
 function relayMeta(origin) {
   const roots = Array.from(new Set(Object.keys(graph).map(k => k.split('.')[0]))).sort();
   return {
@@ -437,18 +386,6 @@ function relayMeta(origin) {
   };
 }
 
-function browserPutHelperJS() {
-  return `
-function hyperScenePut(gun, root, sceneKey, payload){
-  return new Promise(function(resolve, reject){
-    gun.get(root).get('scene').get(sceneKey).put(payload, function(ack){
-      if(ack && ack.err){ reject(new Error(ack.err)); return; }
-      resolve(ack || {ok:true});
-    });
-  });
-}
-`;
-}
 function connectHTML(dp, intent) {
   const target = resolveTargetInfo(dp);
   const bindDp = nearestDataNode(target.nodeDp);
@@ -480,7 +417,23 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
   var local = location.origin + '/gun';
   if (peers.indexOf(local) === -1) peers.unshift(local);
 
-  var gun = Gun({ peers: peers });
+  var gun;
+  try {
+    // Smart Connection Pooling: Check if parent window already has Gun
+    if (window.parent && window.parent.$gun) {
+      gun = window.parent.$gun;
+      console.log('[STREAM FIX] Reusing parent Gun connection for: ${dp}');
+    } else {
+      gun = Gun({ peers: peers });
+      window.$gun = gun;
+      console.log('[STREAM FIX] Booted isolated Gun connection for: ${dp}');
+    }
+  } catch(e) {
+    gun = Gun({ peers: peers });
+    window.$gun = gun;
+    console.log('[STREAM FIX] Booted isolated Gun connection (CORS fallback) for: ${dp}');
+  }
+
   var app = document.getElementById('app');
   var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 
@@ -779,7 +732,6 @@ function serverWrite(path, payload) {
   const existed = !!getNode(path);
   mergeNode(path, payload);
   gunPut(path, graph[path] || payload);
-  notifyImpacted(path);
   return { ok: true, existed_before: existed };
 }
 
@@ -789,7 +741,6 @@ function serverDelete(path) {
     gunNullOut(dp);
     deleteNode(dp);
   }
-  notifyImpacted(path);
   return { ok: true, removed: removed.length };
 }
 
@@ -810,7 +761,6 @@ function clearRoot(rootName) {
     gunNullOut(dp);
     deleteNode(dp);
   }
-  notifyImpacted(rootName);
   return { ok: true, cleared: paths.length };
 }
 
@@ -846,21 +796,6 @@ const server = http.createServer(async (req, res) => {
   const treePath = stripSuffix(raw, '.tree');
   if (treePath && req.method === 'GET') {
     return sendJson(res, { _path: treePath + '.tree', tree: { path: treePath, children: childrenOf(treePath) } });
-  }
-
-  const eventsPath = stripSuffix(raw, '.events');
-  if (eventsPath && req.method === 'GET') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-    });
-    const client = { res, path: eventsPath, origin: parsed.origin };
-    sseClients.add(client);
-    emitResolved(client, 'init');
-    req.on('close', () => sseClients.delete(client));
-    return;
   }
 
   const streamPath = stripSuffix(raw, '.stream') || stripSuffix(raw, '._connect');
