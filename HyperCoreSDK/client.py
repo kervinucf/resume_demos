@@ -552,17 +552,35 @@ class HyperClient:
         atexit.register(self.stop)
         self._wait()
 
-    def _wait(self):
-        deadline = time.time() + 10.0
+    def _wait(self, timeout: float = 15.0) -> None:
+        import socket
+        import time
+
+        deadline = time.time() + timeout
+        host = "127.0.0.1"
+        port = int(self.port)
+        last_err = None
+        attempt = 0
+
+        print(f"[CLIENT WAIT] waiting for TCP relay {host}:{port} timeout={timeout}s")
+
         while time.time() < deadline:
+            attempt += 1
+
             if self._proc and self._proc.poll() is not None:
                 raise RuntimeError(f"Relay exited early with code {self._proc.returncode}")
+
             try:
-                self._req_url(f"{self.relay_url}/?json=1", "GET")
-                return
-            except Exception:
-                time.sleep(0.1)
-        raise RuntimeError("Timed out waiting for relay")
+                with socket.create_connection((host, port), timeout=0.5):
+                    print(f"[CLIENT WAIT] probe #{attempt} connected")
+                    return
+            except Exception as exc:
+                last_err = exc
+                print(f"[CLIENT WAIT] probe #{attempt} failed: {exc!r}")
+
+            time.sleep(0.1)
+
+        raise RuntimeError(f"Timed out waiting for relay (last error: {last_err!r})")
 
     def _find_node(self):
         for name in ("node", "nodejs"):
