@@ -1,11 +1,54 @@
 (() => {
   if (window.customElements.get("hyper-node")) return;
 
-  const FIELD_NAMES = new Set(["data", "html", "css", "js", "fixed", "layer", "schema", "trust"]);
+  const FIELD_NAMES = new Set([
+    "data", "html", "css", "js", "fixed", "layer", "schema", "trust"
+  ]);
   const META_KEYS = new Set(["_", "#", ">"]);
-  const IDLE_TTL_MS = 30000;
-  const OVERSCAN_PX = 2200;
   const DEFAULT_INTRINSIC_SIZE = 96;
+  const OVERSCAN_PX = 2200;
+  const CONTRACT_KEYS = new Set([
+    "manifest", "schema", "links", "actions", "events",
+    "html", "css", "js", "trust"
+  ]);
+
+  // Keys that must never leak from secure into public or vice versa
+  const RESERVED_DATA_KEYS = new Set(["html", "css", "js", "trust"]);
+
+  const LOG = true;
+  const LOG_PAYLOAD_LIMIT = 1200;
+
+  function safePreview(value, max = LOG_PAYLOAD_LIMIT) {
+    let text;
+    try {
+      text = JSON.stringify(value, null, 2);
+    } catch (_) {
+      try { text = String(value); } catch (_) { text = "[unprintable]"; }
+    }
+    if (text.length > max) {
+      return text.slice(0, max) + ` ... [truncated ${text.length - max} chars]`;
+    }
+    return text;
+  }
+
+  function log(node, stage, message, payload) {
+    if (!LOG) return;
+    const label = node && node.id ? `#${node.id}` : "(unbound)";
+    if (payload === undefined) {
+      console.log(`[hyper-node ${label}] ${stage}: ${message}`);
+    } else {
+      console.log(`[hyper-node ${label}] ${stage}: ${message}\n${safePreview(payload)}`);
+    }
+  }
+
+  function warn(node, stage, message, payload) {
+    const label = node && node.id ? `#${node.id}` : "(unbound)";
+    if (payload === undefined) {
+      console.warn(`[hyper-node ${label}] ${stage}: ${message}`);
+    } else {
+      console.warn(`[hyper-node ${label}] ${stage}: ${message}\n${safePreview(payload)}`);
+    }
+  }
 
   function isObject(v) {
     return !!v && typeof v === "object" && !Array.isArray(v);
@@ -24,31 +67,6 @@
     return out;
   }
 
-  function dig(value, path) {
-    let cur = value;
-    for (let i = 0; i < path.length; i++) {
-      if (cur == null) return undefined;
-      cur = cur[path[i]];
-    }
-    return cur;
-  }
-
-  function parseMaybeJSON(value) {
-    if (value === "") return "";
-    try {
-      return JSON.parse(value);
-    } catch (_) {
-      return value;
-    }
-  }
-
-  function escapeHtml(text) {
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
   function deepMerge(base, patch) {
     if (!isObject(base)) base = {};
     if (!isObject(patch)) return base;
@@ -61,86 +79,54 @@
     return out;
   }
 
+  function dig(value, path) {
+    let cur = value;
+    for (let i = 0; i < path.length; i++) {
+      if (cur == null) return undefined;
+      cur = cur[path[i]];
+    }
+    return cur;
+  }
+
   function stableStringify(value) {
-    try {
-      return JSON.stringify(value == null ? null : clean(value));
-    } catch (_) {
-      return String(value);
-    }
+    try { return JSON.stringify(clean(value)); }
+    catch (_) { return String(value); }
   }
 
-  function isSchemaLeafSpec(value) {
-    return isObject(value) && (
-      Object.prototype.hasOwnProperty.call(value, "default") ||
-      Object.prototype.hasOwnProperty.call(value, "type") ||
-      Object.prototype.hasOwnProperty.call(value, "required") ||
-      Object.prototype.hasOwnProperty.call(value, "enum") ||
-      Object.prototype.hasOwnProperty.call(value, "const")
-    );
+  function parseMaybeJSON(value) {
+    if (value === "") return "";
+    try { return JSON.parse(value); } catch (_) { return value; }
   }
 
-  function deriveDefaults(spec) {
-    if (spec === undefined) return undefined;
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 
-    if (Array.isArray(spec)) {
-      return clean(spec);
-    }
-
-    if (!isObject(spec)) {
-      return undefined;
-    }
-
-    if (isSchemaLeafSpec(spec)) {
-      return spec.default !== undefined ? clean(spec.default) : undefined;
-    }
-
+  // ─── STATE BOUNDARY: sanitize data to prevent key misrouting ────────
+  function sanitizePublicData(data) {
+    if (!isObject(data)) return data;
     const out = {};
-    for (const [k, v] of Object.entries(spec)) {
-      const next = deriveDefaults(v);
-      if (next !== undefined) out[k] = next;
+    for (const [k, v] of Object.entries(data)) {
+      if (RESERVED_DATA_KEYS.has(k)) continue;
+      out[k] = v;
     }
-    return Object.keys(out).length ? out : {};
-  }
-
-  function normalizeSchema(schema) {
-    if (!isObject(schema)) return { public: {}, secure: {}, local: {} };
-
-    const hasNamespace =
-      Object.prototype.hasOwnProperty.call(schema, "public") ||
-      Object.prototype.hasOwnProperty.call(schema, "secure") ||
-      Object.prototype.hasOwnProperty.call(schema, "local");
-
-    if (hasNamespace) {
-      return {
-        public: isObject(schema.public) ? schema.public : {},
-        secure: isObject(schema.secure) ? schema.secure : {},
-        local: isObject(schema.local) ? schema.local : {},
-      };
-    }
-
-    return {
-      public: {},
-      secure: {},
-      local: isObject(schema) ? schema : {},
-    };
+    return out;
   }
 
   function normalizeRawPath(raw) {
     let v = String(raw || "").trim();
     if (!v) return "";
-
     if (v.startsWith("$")) v = v.slice(1);
-
     const q = v.indexOf("?");
     if (q !== -1) v = v.slice(0, q);
-
     const h = v.indexOf("#");
     if (h !== -1) v = v.slice(0, h);
-
     v = v.replace(/^\/+/, "");
     if (v.endsWith(".stream")) v = v.slice(0, -7);
     v = v.replace(/\//g, ".");
-
     return v;
   }
 
@@ -193,9 +179,7 @@
     if (!v) return null;
     if (v.startsWith("$")) v = v.slice(1);
 
-    if (/^https?:\/\//i.test(v)) {
-      return parseSource(v, baseHref);
-    }
+    if (/^https?:\/\//i.test(v)) return parseSource(v, baseHref);
 
     const parsed = parseNormalizedPath(v);
     if (!parsed) return null;
@@ -210,73 +194,138 @@
     };
   }
 
-  class PeerRuntime {
-    constructor(peerUrl) {
-      this.peerUrl = peerUrl;
-      this.gun = Gun({ peers: [peerUrl] });
-      this.entries = new Map();
+  function isSchemaLeafSpec(value) {
+    return isObject(value) && (
+      "default" in value ||
+      "type" in value ||
+      "required" in value ||
+      "enum" in value ||
+      "const" in value
+    );
+  }
+
+  function deriveDefaults(spec) {
+    if (spec === undefined) return undefined;
+    if (Array.isArray(spec)) return clean(spec);
+    if (!isObject(spec)) return undefined;
+
+    if (isSchemaLeafSpec(spec)) {
+      return spec.default !== undefined ? clean(spec.default) : undefined;
     }
 
-    subscribe(key, chainFactory, projector, cb) {
-      let entry = this.entries.get(key);
+    const out = {};
+    for (const [k, v] of Object.entries(spec)) {
+      const next = deriveDefaults(v);
+      if (next !== undefined) out[k] = next;
+    }
+    return Object.keys(out).length ? out : {};
+  }
 
-      if (!entry) {
-        entry = {
-          value: undefined,
-          hasValue: false,
-          watchers: new Set(),
-          chain: null,
-          idleTimer: null,
-        };
-        this.entries.set(key, entry);
-      }
+  function normalizeSchema(schema) {
+    if (!isObject(schema)) return { public: {}, secure: {}, local: {} };
 
-      entry.watchers.add(cb);
+    const hasNamespace =
+      "public" in schema || "secure" in schema || "local" in schema;
 
-      if (entry.idleTimer) {
-        clearTimeout(entry.idleTimer);
-        entry.idleTimer = null;
-      }
-
-      if (!entry.chain) {
-        entry.chain = chainFactory(this.gun);
-        entry.chain.on((raw) => {
-          const next = projector ? projector(raw) : raw;
-          entry.value = next;
-          entry.hasValue = true;
-
-          for (const fn of entry.watchers) {
-            try {
-              fn(next);
-            } catch (err) {
-              console.error("[hyper-node] watcher error", err);
-            }
-          }
-        });
-      }
-
-      if (entry.hasValue) cb(entry.value);
-
-      return () => {
-        entry.watchers.delete(cb);
-
-        if (entry.watchers.size === 0) {
-          entry.idleTimer = setTimeout(() => {
-            if (entry.watchers.size > 0) return;
-
-            if (entry.chain && typeof entry.chain.off === "function") {
-              try {
-                entry.chain.off();
-              } catch (_) {}
-            }
-
-            entry.chain = null;
-            entry.idleTimer = null;
-          }, IDLE_TTL_MS);
-        }
+    if (hasNamespace) {
+      return {
+        public: isObject(schema.public) ? schema.public : {},
+        secure: isObject(schema.secure) ? schema.secure : {},
+        local: isObject(schema.local) ? schema.local : {},
       };
     }
+
+    return { public: {}, secure: {}, local: isObject(schema) ? schema : {} };
   }
+
+  function hashString(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  function nodeIdFromSource(src) {
+    return `hyper_${hashString(String(src || ""))}`;
+  }
+
+  function splitAppPayload(value) {
+    const src = clean(value) || {};
+    const data = isObject(src.data) ? clean(src.data) : null;
+    const candidate = data || src;
+
+    const contract = {};
+    let hasContract = false;
+
+    for (const key of CONTRACT_KEYS) {
+      if (candidate[key] !== undefined) {
+        contract[key] = candidate[key];
+        hasContract = true;
+      }
+    }
+
+    const publicData = {};
+
+    if (data) {
+      for (const [k, v] of Object.entries(data)) {
+        if (!CONTRACT_KEYS.has(k) && !RESERVED_DATA_KEYS.has(k)) publicData[k] = v;
+      }
+    } else {
+      for (const [k, v] of Object.entries(src)) {
+        if (!CONTRACT_KEYS.has(k) && k !== "data" && !RESERVED_DATA_KEYS.has(k)) publicData[k] = v;
+      }
+    }
+
+    return {
+      contract: hasContract ? contract : null,
+      publicData: sanitizePublicData(publicData),
+    };
+  }
+
+  // ─── CONTRACT VALIDATION (client-side) ──────────────────────────────
+
+  function validateContract(node, contract) {
+    const warnings = [];
+    if (!contract) return warnings;
+
+    // Only validate manifest if something has been declared
+    const manifest = contract.manifest;
+    if (manifest && Object.keys(manifest).length > 0) {
+      if (!manifest.name) warnings.push("manifest missing 'name'");
+      if (!manifest.version) warnings.push("manifest missing 'version'");
+    }
+
+    const schema = contract.schema;
+    if (schema) {
+      for (const ns of ["public", "secure", "local"]) {
+        if (schema[ns] && !isObject(schema[ns])) {
+          warnings.push(`schema.${ns} is not an object`);
+        }
+      }
+    }
+
+    if (isObject(contract.actions)) {
+      for (const [name, spec] of Object.entries(contract.actions)) {
+        if (!isObject(spec)) warnings.push(`action "${name}" has no spec object`);
+      }
+    }
+
+    if (isObject(contract.events)) {
+      for (const [name, spec] of Object.entries(contract.events)) {
+        if (!isObject(spec)) warnings.push(`event "${name}" has no spec object`);
+      }
+    }
+
+    for (const w of warnings) {
+      warn(node, "contract", w);
+    }
+
+    return warnings;
+  }
+
+  // ─── TEMPLATE REGISTRY ─────────────────────────────────────────────
 
   class TemplateRegistry {
     constructor() {
@@ -302,17 +351,14 @@
 
           if (textSpec || htmlSpec || styleSpec) {
             const stylePaths = styleSpec
-              ? styleSpec
-                  .split(";")
-                  .map((pair) => {
-                    const parts = pair.split(":");
-                    if (parts.length !== 2) return null;
-                    return {
-                      prop: parts[0].trim(),
-                      path: parts[1].trim().split("."),
-                    };
-                  })
-                  .filter(Boolean)
+              ? styleSpec.split(";").map((pair) => {
+                  const parts = pair.split(":");
+                  if (parts.length !== 2) return null;
+                  return {
+                    prop: parts[0].trim(),
+                    path: parts[1].trim().split("."),
+                  };
+                }).filter(Boolean)
               : null;
 
             bindings.push({
@@ -355,22 +401,24 @@
         return cur;
       };
 
-      const bindingRefs = compiled.bindings.map((def) => ({
-        el: resolveNode(fragment, def.nodePath),
-        textPath: def.textPath,
-        htmlPath: def.htmlPath,
-        stylePaths: def.stylePaths,
-      }));
-
-      return { fragment, bindingRefs };
+      return {
+        fragment,
+        bindingRefs: compiled.bindings.map((def) => ({
+          el: resolveNode(fragment, def.nodePath),
+          textPath: def.textPath,
+          htmlPath: def.htmlPath,
+          stylePaths: def.stylePaths,
+        })),
+      };
     }
   }
+
+  // ─── VIEWPORT MANAGER ──────────────────────────────────────────────
 
   class ViewportManager {
     constructor() {
       this.nodes = new Set();
       this.scheduled = false;
-
       this.onScroll = this.onScroll.bind(this);
       this.onResize = this.onResize.bind(this);
 
@@ -388,18 +436,12 @@
       this.nodes.delete(node);
     }
 
-    onScroll() {
-      this.schedule();
-    }
-
-    onResize() {
-      this.schedule();
-    }
+    onScroll() { this.schedule(); }
+    onResize() { this.schedule(); }
 
     schedule() {
       if (this.scheduled) return;
       this.scheduled = true;
-
       requestAnimationFrame(() => {
         this.scheduled = false;
         this.measure();
@@ -419,56 +461,194 @@
     }
   }
 
-  const initialSecureValue = clean(window.$secureContext || {}) || {};
+  // ─── BROWSER STORE ─────────────────────────────────────────────────
+
+  class BrowserHyperStore {
+    constructor() {
+      this.gun = window.$browserGun || Gun();
+      window.$browserGun = this.gun;
+      this.watchers = new Map();
+    }
+
+    envelopePath(nodeId, section) {
+      return this.gun.get("hyper").get("nodes").get(nodeId).get(section);
+    }
+
+    putSection(nodeId, section, value) {
+      this.envelopePath(nodeId, section).put(clean(value || {}));
+    }
+
+    putMeta(nodeId, patch) {
+      this.envelopePath(nodeId, "meta").put(clean(patch || {}));
+    }
+
+    subscribeSection(nodeId, section, cb) {
+      const key = `${nodeId}:${section}`;
+      let entry = this.watchers.get(key);
+
+      if (!entry) {
+        entry = {
+          callbacks: new Set(),
+          chain: this.envelopePath(nodeId, section),
+        };
+        entry.chain.on((value) => {
+          const cleaned = clean(value) || {};
+          for (const fn of entry.callbacks) {
+            try { fn(cleaned); } catch (err) { console.error(err); }
+          }
+        });
+        this.watchers.set(key, entry);
+      }
+
+      entry.callbacks.add(cb);
+
+      return () => {
+        entry.callbacks.delete(cb);
+      };
+    }
+  }
+
+  // ─── PEER RUNTIME ──────────────────────────────────────────────────
+
+  class PeerRuntime {
+    constructor(peerUrl) {
+      this.peerUrl = peerUrl;
+      this.gun = Gun({ peers: [peerUrl] });
+      this.entries = new Map();
+    }
+
+    subscribe(key, chainFactory, projector, cb) {
+      let entry = this.entries.get(key);
+
+      if (!entry) {
+        entry = {
+          value: undefined,
+          hasValue: false,
+          watchers: new Set(),
+          chain: null,
+        };
+        this.entries.set(key, entry);
+      }
+
+      entry.watchers.add(cb);
+
+      if (!entry.chain) {
+        entry.chain = chainFactory(this.gun);
+        entry.chain.on((raw) => {
+          const next = projector ? projector(raw) : raw;
+          entry.value = next;
+          entry.hasValue = true;
+          for (const fn of entry.watchers) {
+            try { fn(next); } catch (err) { console.error(err); }
+          }
+        });
+      }
+
+      if (entry.hasValue) cb(entry.value);
+
+      return () => {
+        entry.watchers.delete(cb);
+      };
+    }
+  }
+
+  // ─── SECURE CONTEXT ────────────────────────────────────────────────
+  // The secure context is a per-instance isolated store, NOT a global
+  // singleton. Each hyper-node that declares secure schema gets its
+  // own secure namespace. The host page sets secure context per node
+  // through the element API, not through a single global.
+
+  class SecureContextStore {
+    constructor() {
+      this.stores = new Map();  // nodeId -> { value, listeners }
+      this.globalValue = clean(window.$secureContext || {}) || {};
+      this.globalListeners = new Set();
+    }
+
+    // Global secure context for backward compat
+    getGlobal() {
+      return this.globalValue || {};
+    }
+
+    setGlobal(next) {
+      const cleaned = clean(next || {}) || {};
+      const prev = stableStringify(this.globalValue || {});
+      const nextSig = stableStringify(cleaned);
+      if (prev === nextSig) return this.globalValue;
+
+      this.globalValue = cleaned;
+      for (const fn of this.globalListeners) {
+        try { fn(this.globalValue); } catch (err) { console.error(err); }
+      }
+      // Notify all per-node stores too
+      for (const [, store] of this.stores) {
+        const merged = deepMerge(this.globalValue, store.overlay || {});
+        store.value = merged;
+        for (const fn of store.listeners) {
+          try { fn(merged); } catch (err) { console.error(err); }
+        }
+      }
+      window.dispatchEvent(new CustomEvent("hyper-secure-context-change", {
+        detail: { value: this.globalValue },
+      }));
+      return this.globalValue;
+    }
+
+    mergeGlobal(patch) {
+      return this.setGlobal(deepMerge(this.getGlobal(), patch || {}));
+    }
+
+    subscribeGlobal(fn) {
+      this.globalListeners.add(fn);
+      return () => { this.globalListeners.delete(fn); };
+    }
+
+    // Per-node secure context
+    getForNode(nodeId) {
+      const store = this.stores.get(nodeId);
+      if (!store) return this.globalValue || {};
+      return store.value || this.globalValue || {};
+    }
+
+    setForNode(nodeId, overlay) {
+      let store = this.stores.get(nodeId);
+      if (!store) {
+        store = { value: {}, overlay: {}, listeners: new Set() };
+        this.stores.set(nodeId, store);
+      }
+      store.overlay = clean(overlay || {}) || {};
+      store.value = deepMerge(this.globalValue, store.overlay);
+      for (const fn of store.listeners) {
+        try { fn(store.value); } catch (err) { console.error(err); }
+      }
+      return store.value;
+    }
+
+    mergeForNode(nodeId, patch) {
+      const current = this.getForNode(nodeId);
+      return this.setForNode(nodeId, deepMerge(current, patch || {}));
+    }
+
+    subscribeForNode(nodeId, fn) {
+      let store = this.stores.get(nodeId);
+      if (!store) {
+        store = { value: deepMerge(this.globalValue, {}), overlay: {}, listeners: new Set() };
+        this.stores.set(nodeId, store);
+      }
+      store.listeners.add(fn);
+      return () => { store.listeners.delete(fn); };
+    }
+  }
+
+  // ─── RUNTIME SINGLETON ─────────────────────────────────────────────
 
   const runtime = window.$hyperRuntime || {
-    peers: new Map(),
     templates: new TemplateRegistry(),
     viewport: new ViewportManager(),
+    browserStore: new BrowserHyperStore(),
+    peers: new Map(),
     resizeObserver: null,
-
-    secure: {
-      value: initialSecureValue,
-      listeners: new Set(),
-
-      get() {
-        return this.value || {};
-      },
-
-      set(next) {
-        const cleaned = clean(next || {}) || {};
-        const prevSig = stableStringify(this.value || {});
-        const nextSig = stableStringify(cleaned);
-        if (prevSig === nextSig) return this.value;
-
-        this.value = cleaned;
-
-        for (const fn of this.listeners) {
-          try {
-            fn(this.value);
-          } catch (err) {
-            console.error("[hyper-node] secure listener error", err);
-          }
-        }
-
-        window.dispatchEvent(
-          new CustomEvent("hyper-secure-context-change", {
-            detail: { value: this.value },
-          })
-        );
-
-        return this.value;
-      },
-
-      merge(patch) {
-        return this.set(deepMerge(this.get(), patch || {}));
-      },
-
-      subscribe(fn) {
-        this.listeners.add(fn);
-        return () => this.listeners.delete(fn);
-      },
-    },
+    secure: new SecureContextStore(),
 
     getPeer(peerUrl) {
       let peer = this.peers.get(peerUrl);
@@ -477,10 +657,6 @@
         this.peers.set(peerUrl, peer);
       }
       return peer;
-    },
-
-    prewarm(peerUrl) {
-      return this.getPeer(peerUrl);
     },
 
     observeSize(node) {
@@ -499,60 +675,31 @@
 
     unobserveSize(node) {
       if (!this.resizeObserver) return;
-      try {
-        this.resizeObserver.unobserve(node);
-      } catch (_) {}
-    },
-
-    subscribeNode(info, cb) {
-      const peer = this.getPeer(info.peerUrl);
-      const key = `node|${info.peerUrl}|${info.root}|${info.scenePath}`;
-
-      return peer.subscribe(
-        key,
-        (gun) => gun.get(info.root).get("scene").get(info.scenePath),
-        (raw) => clean(raw) || {},
-        cb
-      );
-    },
-
-    subscribeData(info, cb) {
-      const peer = this.getPeer(info.peerUrl);
-      const key = `data|${info.peerUrl}|${info.root}|${info.scenePath}`;
-
-      return peer.subscribe(
-        key,
-        (gun) => gun.get(info.root).get("scene").get(info.scenePath).get("data"),
-        (raw) => clean(raw) || {},
-        cb
-      );
+      try { this.resizeObserver.unobserve(node); } catch (_) {}
     },
   };
 
   window.$hyperRuntime = runtime;
 
+  // Backward-compat global secure context accessors
   try {
     Object.defineProperty(window, "$secureContext", {
       configurable: true,
       enumerable: true,
-      get() {
-        return runtime.secure.get();
-      },
-      set(v) {
-        runtime.secure.set(v);
-      },
+      get() { return runtime.secure.getGlobal(); },
+      set(v) { runtime.secure.setGlobal(v); },
     });
-  } catch (_) {
-    window.$secureContext = runtime.secure.get();
-  }
+  } catch (_) {}
 
   window.$setSecureContext = function (next) {
-    return runtime.secure.set(next);
+    return runtime.secure.setGlobal(next);
   };
 
   window.$mergeSecureContext = function (patch) {
-    return runtime.secure.merge(patch);
+    return runtime.secure.mergeGlobal(patch);
   };
+
+  // ─── HYPER-NODE ELEMENT ─────────────────────────────────────────────
 
   class HyperNode extends HTMLElement {
     static get observedAttributes() {
@@ -600,8 +747,11 @@
       this.shadowRoot.appendChild(this.styleEl);
       this.shadowRoot.appendChild(this.container);
 
+      this.nodeId = null;
+
       this._descriptor = null;
-      this._unsubs = [];
+      this._remoteUnsubs = [];
+      this._localUnsubs = [];
       this._offSecure = null;
       this._renderQueued = false;
       this._bindingRefs = [];
@@ -609,27 +759,57 @@
       this._lastCss = null;
       this._lastJsSignature = null;
 
-      this.currentNode = {};
-      this.currentData = {};
-      this.literalCtx = {};
-      this.boundCtx = Object.create(null);
-      this.bindingTargets = Object.create(null);
-      this.value = undefined;
+      // ── Rebinding safety ──
+      // Track the generation of the current mount. When HTML changes
+      // structurally, we bump the generation, which invalidates the
+      // __bound guard and lets node JS re-bind to new DOM.
+      this._mountGeneration = 0;
 
       this.schema = { public: {}, secure: {}, local: {} };
       this.schemaSignature = stableStringify(this.schema);
-      this.localState = {};
+
       this.publicContext = {};
       this.secureContext = {};
       this.localContext = {};
       this.bindingContext = {};
+
+      this.contract = {
+        manifest: {},
+        schema: { public: {}, secure: {}, local: {} },
+        links: {},
+        actions: {},
+        events: {},
+        trust: "public",
+        html: "",
+        css: "",
+        js: "",
+      };
+
+      this.stateEnvelope = {
+        public: {},
+        local: {},
+        meta: {},
+      };
+
+      this.literalCtx = {};
+      this.boundCtx = Object.create(null);
+      this.bindingTargets = Object.create(null);
+
+      this._actions = {};
+      this._actionHandlers = {};
+      this._events = {};
+      this._links = {};
+      this._manifest = {};
+      this.value = undefined;
     }
 
     connectedCallback() {
+      log(this, "lifecycle", "connected");
+
       runtime.viewport.register(this);
       runtime.observeSize(this);
 
-      this._offSecure = runtime.secure.subscribe(() => {
+      this._offSecure = runtime.secure.subscribeGlobal(() => {
         this.requestRender();
       });
 
@@ -637,6 +817,8 @@
     }
 
     disconnectedCallback() {
+      log(this, "lifecycle", "disconnected");
+
       runtime.viewport.unregister(this);
       runtime.unobserveSize(this);
 
@@ -657,7 +839,6 @@
     __setViewportActive(active) {
       if (this.__viewportActive === active) return;
       this.__viewportActive = active;
-
       if (active && this.__pendingOffscreen) {
         this.__pendingOffscreen = false;
         this.requestRender();
@@ -672,25 +853,300 @@
     }
 
     teardown() {
-      for (const off of this._unsubs) {
-        try {
-          off();
-        } catch (_) {}
+      for (const off of this._remoteUnsubs) {
+        try { off(); } catch (_) {}
       }
-      this._unsubs = [];
+      for (const off of this._localUnsubs) {
+        try { off(); } catch (_) {}
+      }
+      this._remoteUnsubs = [];
+      this._localUnsubs = [];
       this._renderQueued = false;
     }
 
     getTrustMode() {
       const attrTrust = (this.getAttribute("trust") || "").trim();
-      const nodeTrust = this.currentNode && this.currentNode.trust != null
-        ? String(this.currentNode.trust).trim()
+      const contractTrust = this.contract && this.contract.trust != null
+        ? String(this.contract.trust).trim()
         : "";
-      const literalTrust = this.literalCtx && this.literalCtx._trust != null
-        ? String(this.literalCtx._trust).trim()
-        : "";
+      return attrTrust || contractTrust || "public";
+    }
 
-      return attrTrust || nodeTrust || literalTrust || "public";
+    syncDerivedContractState() {
+      this.schema = normalizeSchema(this.contract.schema || {});
+      this.schemaSignature = stableStringify(this.schema);
+      this._manifest = this.contract.manifest || {};
+      this._links = this.contract.links || {};
+      this._actions = this.contract.actions || {};
+      this._events = this.contract.events || {};
+    }
+
+    applyContractNow(contractPatch) {
+      const base = {
+        manifest: {},
+        schema: { public: {}, secure: {}, local: {} },
+        links: {},
+        actions: {},
+        events: {},
+        trust: "public",
+        html: "",
+        css: "",
+        js: "",
+      };
+
+      const next = deepMerge(base, deepMerge(this.contract || {}, clean(contractPatch || {})));
+
+      // ── Contract validation ──
+      validateContract(this, next);
+
+      this.contract = next;
+      this.syncDerivedContractState();
+
+      const localDefaults = deriveDefaults(this.schema.local) || {};
+      this.stateEnvelope.local = deepMerge(localDefaults, this.stateEnvelope.local || {});
+
+      const secureDefaults = deriveDefaults(this.schema.secure) || {};
+      if (this.nodeId) {
+        runtime.secure.mergeForNode(this.nodeId, secureDefaults);
+      }
+
+      const publicDefaults = deriveDefaults(this.schema.public) || {};
+      this.stateEnvelope.public = deepMerge(publicDefaults, this.stateEnvelope.public || {});
+
+      return this.contract;
+    }
+
+    applyPublicNow(nextPublic) {
+      const publicDefaults = deriveDefaults(this.schema.public) || {};
+      this.stateEnvelope.public = deepMerge(publicDefaults, sanitizePublicData(clean(nextPublic || {}) || {}));
+      return this.stateEnvelope.public;
+    }
+
+    applyLocalNow(nextLocal) {
+      const localDefaults = deriveDefaults(this.schema.local) || {};
+      this.stateEnvelope.local = deepMerge(localDefaults, clean(nextLocal || {}) || {});
+      return this.stateEnvelope.local;
+    }
+
+    persistContract() {
+      runtime.browserStore.putSection(this.nodeId, "contract", this.contract);
+    }
+
+    persistPublic() {
+      runtime.browserStore.putSection(this.nodeId, "public", this.stateEnvelope.public);
+    }
+
+    persistLocal() {
+      runtime.browserStore.putSection(this.nodeId, "local", this.stateEnvelope.local);
+    }
+
+    initBrowserEnvelope() {
+      runtime.browserStore.putSection(this.nodeId, "source", {
+        path: this._descriptor ? this._descriptor.normalized : null,
+        href: this._descriptor ? this._descriptor.href : null,
+        peer: this._descriptor ? this._descriptor.peerUrl : null,
+      });
+
+      this.applyContractNow({
+        manifest: {},
+        schema: { public: {}, secure: {}, local: {} },
+        links: {},
+        actions: {},
+        events: {},
+        trust: this.getAttribute("trust") || "public",
+        html: "",
+        css: "",
+        js: "",
+      });
+      this.persistContract();
+
+      this.applyPublicNow({});
+      this.persistPublic();
+
+      this.applyLocalNow({});
+      this.persistLocal();
+
+      runtime.browserStore.putSection(this.nodeId, "meta", {
+        stale: false,
+        syncedAt: null,
+      });
+
+      this._localUnsubs.push(
+        runtime.browserStore.subscribeSection(this.nodeId, "contract", (value) => {
+          this.applyContractNow(value);
+          this.requestRender();
+        })
+      );
+
+      this._localUnsubs.push(
+        runtime.browserStore.subscribeSection(this.nodeId, "public", (value) => {
+          this.applyPublicNow(value);
+          this.requestRender();
+        })
+      );
+
+      this._localUnsubs.push(
+        runtime.browserStore.subscribeSection(this.nodeId, "local", (value) => {
+          this.applyLocalNow(value);
+          this.requestRender();
+        })
+      );
+
+      this._localUnsubs.push(
+        runtime.browserStore.subscribeSection(this.nodeId, "meta", (value) => {
+          this.stateEnvelope.meta = clean(value) || {};
+          this.requestRender();
+        })
+      );
+
+      // Per-node secure subscription
+      this._localUnsubs.push(
+        runtime.secure.subscribeForNode(this.nodeId, () => {
+          this.requestRender();
+        })
+      );
+    }
+
+    mirrorRemoteToBrowser(descriptor) {
+      const peer = runtime.getPeer(descriptor.peerUrl);
+
+      this._remoteUnsubs.push(
+        peer.subscribe(
+          `node|${descriptor.peerUrl}|${descriptor.root}|${descriptor.scenePath}`,
+          (gun) => gun.get(descriptor.root).get("scene").get(descriptor.scenePath),
+          (raw) => clean(raw) || {},
+          (nodeValue) => {
+            const split = splitAppPayload(nodeValue);
+
+            if (split.contract) {
+              this.applyContractNow(deepMerge(
+                {
+                  trust: this.getAttribute("trust") || "public",
+                  html: "",
+                  css: "",
+                  js: "",
+                },
+                split.contract
+              ));
+              this.persistContract();
+            }
+
+            const publicDefaults = deriveDefaults(this.schema.public) || {};
+            const nextPublic = deepMerge(
+              publicDefaults,
+              deepMerge(
+                this.literalCtx || {},
+                deepMerge(this.boundCtx || {}, split.publicData || {})
+              )
+            );
+
+            this.applyPublicNow(nextPublic);
+            this.persistPublic();
+
+            runtime.browserStore.putMeta(this.nodeId, {
+              stale: false,
+              syncedAt: new Date().toISOString(),
+            });
+
+            this.requestRender();
+          }
+        )
+      );
+
+      this._remoteUnsubs.push(
+        peer.subscribe(
+          `data|${descriptor.peerUrl}|${descriptor.root}|${descriptor.scenePath}`,
+          (gun) => gun.get(descriptor.root).get("scene").get(descriptor.scenePath).get("data"),
+          (raw) => clean(raw) || {},
+          (dataValue) => {
+            const split = splitAppPayload({ data: dataValue });
+
+            if (split.contract) {
+              this.applyContractNow(deepMerge(
+                {
+                  trust: this.getAttribute("trust") || "public",
+                  html: "",
+                  css: "",
+                  js: "",
+                },
+                split.contract
+              ));
+              this.persistContract();
+            }
+
+            const publicDefaults = deriveDefaults(this.schema.public) || {};
+            const nextPublic = deepMerge(
+              publicDefaults,
+              deepMerge(
+                this.literalCtx || {},
+                deepMerge(this.boundCtx || {}, split.publicData || {})
+              )
+            );
+
+            this.applyPublicNow(nextPublic);
+            this.persistPublic();
+
+            runtime.browserStore.putMeta(this.nodeId, {
+              stale: false,
+              syncedAt: new Date().toISOString(),
+            });
+
+            this.requestRender();
+          }
+        )
+      );
+    }
+
+    subscribeBindings() {
+      const updatePublicEnvelope = () => {
+        const publicDefaults = deriveDefaults(this.schema.public) || {};
+        const nextPublic = deepMerge(
+          publicDefaults,
+          deepMerge(
+            this.literalCtx || {},
+            this.boundCtx || {}
+          )
+        );
+        this.applyPublicNow(nextPublic);
+        this.persistPublic();
+        this.requestRender();
+      };
+
+      for (const [name, info] of Object.entries(this.bindingTargets)) {
+        const peer = runtime.getPeer(info.peerUrl);
+
+        if (info.fieldPath[0] === "data") {
+          this._remoteUnsubs.push(
+            peer.subscribe(
+              `bind:data|${info.peerUrl}|${info.root}|${info.scenePath}|${name}`,
+              (gun) => gun.get(info.root).get("scene").get(info.scenePath).get("data"),
+              (raw) => clean(raw) || {},
+              (value) => {
+                this.boundCtx[name] =
+                  info.fieldPath.length > 1
+                    ? dig(value, info.fieldPath.slice(1))
+                    : value;
+                updatePublicEnvelope();
+              }
+            )
+          );
+        } else {
+          this._remoteUnsubs.push(
+            peer.subscribe(
+              `bind:node|${info.peerUrl}|${info.root}|${info.scenePath}|${name}`,
+              (gun) => gun.get(info.root).get("scene").get(info.scenePath),
+              (raw) => clean(raw) || {},
+              (value) => {
+                this.boundCtx[name] =
+                  info.fieldPath.length > 0
+                    ? dig(value, info.fieldPath)
+                    : value;
+                updatePublicEnvelope();
+              }
+            )
+          );
+        }
+      }
     }
 
     mount() {
@@ -703,84 +1159,229 @@
       if (!descriptor) return;
 
       this._descriptor = descriptor;
-      this.currentNode = {};
-      this.currentData = {};
+      this.nodeId = nodeIdFromSource(descriptor.href);
+
+      // ── FIELD PATH: raw value subscription ──
+      // When the src targets a specific field (e.g. data.temp),
+      // don't load the node contract. Subscribe directly to the
+      // full dot path in Gun and render the raw value.
+      if (descriptor.fieldPath.length > 0) {
+        this._mountGeneration++;
+
+        // Build the full Gun chain for the entire dot path
+        // e.g. demo111.weather.nyc.panel.data.temp
+        //   -> gun.get("demo111").get("scene").get("weather/nyc/panel/data/temp")
+        // But also try the more natural interpretation:
+        //   -> gun.get("demo111").get("scene").get("weather/nyc/panel").get("data").get("temp")
+        const fullScenePath = descriptor.scenePath +
+          "/" + descriptor.fieldPath.join("/");
+
+        const peer = runtime.getPeer(descriptor.peerUrl);
+
+        // Subscribe to the field by walking the Gun chain
+        // node.get("data").get("temp") for fieldPath = ["data", "temp"]
+        this._remoteUnsubs.push(
+          peer.subscribe(
+            `field|${descriptor.peerUrl}|${descriptor.root}|${descriptor.scenePath}|${descriptor.fieldPath.join(".")}`,
+            (gun) => {
+              let chain = gun.get(descriptor.root).get("scene").get(descriptor.scenePath);
+              for (const seg of descriptor.fieldPath) {
+                chain = chain.get(seg);
+              }
+              return chain;
+            },
+            (raw) => {
+              // Raw value — could be a primitive or an object
+              if (raw && typeof raw === "object") return clean(raw);
+              return raw;
+            },
+            (value) => {
+              this.value = value;
+              this.renderValue(value);
+              this.dispatchEvent(new CustomEvent("hyper-update", {
+                detail: { value, fieldPath: descriptor.fieldPath },
+                bubbles: true,
+                composed: true,
+              }));
+            }
+          )
+        );
+
+        return;
+      }
+
+      // Bump mount generation to allow node JS to rebind
+      this._mountGeneration++;
+
       this.literalCtx = {};
       this.boundCtx = Object.create(null);
       this.bindingTargets = Object.create(null);
-
-      runtime.prewarm(descriptor.peerUrl);
 
       for (const [key, val] of descriptor.searchParams.entries()) {
         const raw = String(val || "");
         if (raw.startsWith("$")) {
           const bindingInfo = parseBindingRef(raw, descriptor.href, descriptor.peerUrl);
-          if (bindingInfo) {
-            this.bindingTargets[key] = bindingInfo;
-            runtime.prewarm(bindingInfo.peerUrl);
-          }
+          if (bindingInfo) this.bindingTargets[key] = bindingInfo;
         } else {
           this.literalCtx[key] = parseMaybeJSON(raw);
         }
       }
 
-      const rerender = () => this.requestRender();
+      this.initBrowserEnvelope();
+      this.mirrorRemoteToBrowser(descriptor);
+      this.subscribeBindings();
 
-      if (!descriptor.fieldPath.length) {
-        this._unsubs.push(
-          runtime.subscribeNode(descriptor, (value) => {
-            this.currentNode = isObject(value) ? value : {};
-            rerender();
-          })
-        );
+      this.applyPublicNow(this.literalCtx || {});
+      this.persistPublic();
+      this.requestRender();
+    }
 
-        this._unsubs.push(
-          runtime.subscribeData(descriptor, (value) => {
-            this.currentData = isObject(value) ? value : {};
-            rerender();
-          })
-        );
-      } else if (descriptor.fieldPath[0] === "data") {
-        this._unsubs.push(
-          runtime.subscribeData(descriptor, (value) => {
-            this.currentData = isObject(value) ? value : {};
-            rerender();
-          })
-        );
-      } else {
-        this._unsubs.push(
-          runtime.subscribeNode(descriptor, (value) => {
-            this.currentNode = isObject(value) ? value : {};
-            rerender();
-          })
-        );
-      }
+    // ─── Contract declaration API ─────────────────────────────────────
 
-      for (const [name, info] of Object.entries(this.bindingTargets)) {
-        if (info.fieldPath[0] === "data") {
-          this._unsubs.push(
-            runtime.subscribeData(info, (value) => {
-              this.boundCtx[name] =
-                info.fieldPath.length > 1
-                  ? dig(value, info.fieldPath.slice(1))
-                  : value;
-              rerender();
-            })
-          );
-        } else {
-          this._unsubs.push(
-            runtime.subscribeNode(info, (value) => {
-              this.boundCtx[name] =
-                info.fieldPath.length > 0
-                  ? dig(value, info.fieldPath)
-                  : value;
-              rerender();
-            })
-          );
-        }
-      }
+    defineSchema(schema) {
+      const nextSchema = deepMerge(this.schema, normalizeSchema(schema));
+      const nextSig = stableStringify(nextSchema);
+      if (nextSig === this.schemaSignature) return this.schema;
+
+      this.applyContractNow({ schema: nextSchema });
+      this.persistContract();
+
+      this.applyLocalNow(this.stateEnvelope.local || {});
+      this.persistLocal();
 
       this.requestRender();
+      return this.schema;
+    }
+
+    defineManifest(manifest) {
+      this.applyContractNow({ manifest: clean(manifest || {}) || {} });
+      this.persistContract();
+      this.requestRender();
+      return this.contract.manifest;
+    }
+
+    defineLinks(links) {
+      this.applyContractNow({ links: clean(links || {}) || {} });
+      this.persistContract();
+      this.requestRender();
+      return this.contract.links;
+    }
+
+    defineActions(actions) {
+      this.applyContractNow({ actions: clean(actions || {}) || {} });
+      this.persistContract();
+      this.requestRender();
+      return this.contract.actions;
+    }
+
+    defineEvents(events) {
+      this.applyContractNow({ events: clean(events || {}) || {} });
+      this.persistContract();
+      this.requestRender();
+      return this.contract.events;
+    }
+
+    registerAction(name, fn, meta) {
+      if (typeof name !== "string" || !name) return;
+      if (typeof fn === "function") this._actionHandlers[name] = fn;
+      if (meta !== undefined) {
+        this.defineActions({ [name]: clean(meta) });
+      }
+    }
+
+    // ── Event emission with contract enforcement ──
+    emit(name, detail) {
+      if (isObject(this._events) && Object.keys(this._events).length > 0) {
+        if (!this._events[name]) {
+          warn(this, "event", `emitting undeclared event "${name}" — declare it with defineEvents()`);
+        }
+      }
+      this.dispatchEvent(new CustomEvent(name, {
+        detail: clean(detail),
+        bubbles: true,
+        composed: true,
+      }));
+    }
+
+    call(name, payload) {
+      const fn = this._actionHandlers[name];
+      if (typeof fn !== "function") {
+        throw new Error(`No action registered for "${name}"`);
+      }
+      return fn(payload);
+    }
+
+    follow(rel) {
+      return this.links()[rel];
+    }
+
+    state() {
+      return {
+        public: this.publicContext,
+        secure: this.secureContext,
+        local: this.localContext,
+      };
+    }
+
+    links() {
+      const src = this._descriptor ? this._descriptor.href : null;
+      return deepMerge({ self: src }, this._links || {});
+    }
+
+    actions() {
+      return { ...(this._actions || {}) };
+    }
+
+    events() {
+      return { ...(this._events || {}) };
+    }
+
+    describe() {
+      return {
+        manifest: this._manifest || {},
+        schema: this.schema,
+        state: this.state(),
+        links: this.links(),
+        actions: this.actions(),
+        events: this.events(),
+        trust: this.getTrustMode(),
+        src: this._descriptor ? this._descriptor.href : null,
+        path: this._descriptor ? this._descriptor.normalized : null,
+        meta: this.stateEnvelope.meta || {},
+      };
+    }
+
+    getPublic() { return this.publicContext; }
+    getSecure() { return this.secureContext; }
+    getLocal() { return this.localContext; }
+    getSchema() { return this.schema; }
+
+    setLocal(next) {
+      this.applyLocalNow(next);
+      this.persistLocal();
+      this.requestRender();
+      return this.localContext;
+    }
+
+    mergeLocal(patch) {
+      this.applyLocalNow(deepMerge(this.localContext || {}, patch || {}));
+      this.persistLocal();
+      this.requestRender();
+      return this.localContext;
+    }
+
+    setSecure(next) {
+      if (this.nodeId) {
+        return runtime.secure.setForNode(this.nodeId, next);
+      }
+      return runtime.secure.setGlobal(next);
+    }
+
+    mergeSecure(patch) {
+      if (this.nodeId) {
+        return runtime.secure.mergeForNode(this.nodeId, patch);
+      }
+      return runtime.secure.mergeGlobal(patch);
     }
 
     requestRender() {
@@ -798,118 +1399,18 @@
       });
     }
 
-    mergeSchema(schema) {
-      const next = deepMerge(this.schema, normalizeSchema(schema));
-      const nextSig = stableStringify(next);
-      if (nextSig === this.schemaSignature) return this.schema;
-
-      this.schema = next;
-      this.schemaSignature = nextSig;
-
-      const secureDefaults = deriveDefaults(this.schema.secure) || {};
-      const nextSecure = deepMerge(secureDefaults, runtime.secure.get() || {});
-      if (stableStringify(nextSecure) !== stableStringify(runtime.secure.get() || {})) {
-        runtime.secure.set(nextSecure);
-      }
-
-      const localDefaults = deriveDefaults(this.schema.local) || {};
-      const nextLocal = deepMerge(localDefaults, this.localState || {});
-      if (stableStringify(nextLocal) !== stableStringify(this.localState || {})) {
-        this.localState = nextLocal;
-      }
-
-      this.requestRender();
-      return this.schema;
-    }
-
-    defineSchema(schema) {
-      return this.mergeSchema(schema);
-    }
-
-    getSchema() {
-      return this.schema;
-    }
-
-    getPublic() {
-      return this.publicContext;
-    }
-
-    getSecure() {
-      return this.secureContext;
-    }
-
-    getLocal() {
-      return this.localContext;
-    }
-
-    getContext() {
-      return this.bindingContext;
-    }
-
-    setLocal(next) {
-      const cleaned = clean(next || {}) || {};
-      if (stableStringify(cleaned) === stableStringify(this.localState || {})) {
-        return this.localState;
-      }
-      this.localState = cleaned;
-      this.requestRender();
-      return this.localState;
-    }
-
-    mergeLocal(patch) {
-      return this.setLocal(deepMerge(this.localState || {}, patch || {}));
-    }
-
-    setSecure(next) {
-      return runtime.secure.set(next);
-    }
-
-    mergeSecure(patch) {
-      return runtime.secure.merge(patch);
-    }
-
-    buildRawPublicContext() {
-      const out = {};
-
-      if (isObject(this.currentNode.data)) Object.assign(out, this.currentNode.data);
-      if (isObject(this.currentData)) Object.assign(out, this.currentData);
-
-      Object.assign(out, this.literalCtx);
-      Object.assign(out, this.boundCtx);
-
-      return out;
-    }
-
-    buildContexts() {
-      const publicDefaults = deriveDefaults(this.schema.public) || {};
-      const secureDefaults = deriveDefaults(this.schema.secure) || {};
-      const localDefaults = deriveDefaults(this.schema.local) || {};
-
-      const publicCtx = deepMerge(publicDefaults, this.buildRawPublicContext());
-      const secureCtx = deepMerge(secureDefaults, runtime.secure.get() || {});
-      const localCtx = deepMerge(localDefaults, this.localState || {});
-
-      const bindCtx = Object.assign({}, publicCtx, {
-        public: publicCtx,
-        secure: secureCtx,
-        local: localCtx,
-        schema: this.schema,
-      });
-
-      this.publicContext = publicCtx;
-      this.secureContext = secureCtx;
-      this.localContext = localCtx;
-      this.bindingContext = bindCtx;
-
-      return { publicCtx, secureCtx, localCtx, bindCtx };
-    }
-
     applyTemplate(html) {
       const compiled = runtime.templates.clone(html);
       this.container.replaceChildren(compiled.fragment);
       this._bindingRefs = compiled.bindingRefs;
       this._lastHtml = html;
+
+      // ── Rebinding safety ──
+      // When HTML changes structurally, invalidate the JS signature
+      // so runNodeScript will re-execute, and bump the generation
+      // so the __bound guard (keyed on generation) allows re-binding.
       this._lastJsSignature = null;
+      this._mountGeneration++;
     }
 
     fastBind(ctx) {
@@ -948,6 +1449,36 @@
       }
     }
 
+    buildContexts() {
+      const publicDefaults = deriveDefaults(this.schema.public) || {};
+      const secureDefaults = deriveDefaults(this.schema.secure) || {};
+      const localDefaults = deriveDefaults(this.schema.local) || {};
+
+      const publicCtx = deepMerge(publicDefaults, this.stateEnvelope.public || {});
+
+      // ── State boundary: secure reads from per-node store ──
+      const secureCtx = deepMerge(
+        secureDefaults,
+        this.nodeId ? runtime.secure.getForNode(this.nodeId) : runtime.secure.getGlobal()
+      );
+
+      const localCtx = deepMerge(localDefaults, this.stateEnvelope.local || {});
+
+      const bindCtx = Object.assign({}, publicCtx, {
+        public: publicCtx,
+        secure: secureCtx,
+        local: localCtx,
+        schema: this.schema,
+      });
+
+      this.publicContext = publicCtx;
+      this.secureContext = secureCtx;
+      this.localContext = localCtx;
+      this.bindingContext = bindCtx;
+
+      return { publicCtx, secureCtx, localCtx, bindCtx };
+    }
+
     buildHyperContext(publicCtx, secureCtx, localCtx, bindCtx) {
       const trustMode = this.getTrustMode();
       const params = trustMode === "trusted" ? bindCtx : publicCtx;
@@ -965,8 +1496,23 @@
         schema: this.schema,
 
         defineSchema: (schema) => this.defineSchema(schema),
-        getSchema: () => this.getSchema(),
+        defineManifest: (manifest) => this.defineManifest(manifest),
+        defineLinks: (links) => this.defineLinks(links),
+        defineActions: (actions) => this.defineActions(actions),
+        defineEvents: (events) => this.defineEvents(events),
+        registerAction: (name, fn, meta) => this.registerAction(name, fn, meta),
+        emit: (name, detail) => this.emit(name, detail),
+
+        describe: () => this.describe(),
+        state: () => this.state(),
+        links: () => this.links(),
+        actions: () => this.actions(),
+        events: () => this.events(),
+        follow: (rel) => this.follow(rel),
+        call: (name, payload) => this.call(name, payload),
+
         getPublic: () => this.getPublic(),
+        getSchema: () => this.getSchema(),
 
         getLocal: trustMode === "trusted" ? () => this.getLocal() : undefined,
         setLocal: trustMode === "trusted" ? (next) => this.setLocal(next) : undefined,
@@ -984,13 +1530,16 @@
     }
 
     runNodeScript(publicCtx, secureCtx, localCtx, bindCtx) {
-      const js = this.currentNode && this.currentNode.js != null
-        ? String(this.currentNode.js)
+      const js = this.contract && this.contract.js != null
+        ? String(this.contract.js)
         : "";
 
       if (!js) return;
 
-      const signature = `${this._lastHtml || ""}::${js}::${this.getTrustMode()}::${this.schemaSignature}`;
+      // ── Rebinding safety ──
+      // Include mount generation in signature so that structural HTML
+      // changes allow JS to re-execute and rebind to new DOM elements.
+      const signature = `${this._mountGeneration}::${this._lastHtml || ""}::${js}::${this.getTrustMode()}::${this.schemaSignature}`;
       if (signature === this._lastJsSignature) return;
 
       this._lastJsSignature = signature;
@@ -998,6 +1547,13 @@
       try {
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const hyperContext = this.buildHyperContext(publicCtx, secureCtx, localCtx, bindCtx);
+
+        // ── Rebinding safety ──
+        // Expose the current mount generation so node JS can key its
+        // __bound guard on it instead of a simple boolean.
+        // Pattern: if (hyperElement.__boundGen === hyperElement.__mountGen) return;
+        //          hyperElement.__boundGen = hyperElement.__mountGen;
+        this.__mountGen = this._mountGeneration;
 
         new AsyncFunction("document", "root", "hyperContext", "hyperElement", js).call(
           this,
@@ -1041,52 +1597,36 @@
     }
 
     dispatchUpdate() {
-      this.dispatchEvent(
-        new CustomEvent("hyper-update", {
-          detail: {
-            value: this.value,
-            public: this.publicContext,
-            secure: this.secureContext,
-            local: this.localContext,
-            schema: this.schema,
-            src: this._descriptor ? this._descriptor.href : null,
-            path: this._descriptor ? this._descriptor.normalized : null,
-            trust: this.getTrustMode(),
-          },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      const detail = {
+        value: this.value,
+        public: this.publicContext,
+        secure: this.secureContext,
+        local: this.localContext,
+        schema: this.schema,
+        src: this._descriptor ? this._descriptor.href : null,
+        path: this._descriptor ? this._descriptor.normalized : null,
+        trust: this.getTrustMode(),
+        describe: this.describe(),
+      };
+      this.dispatchEvent(new CustomEvent("hyper-update", {
+        detail,
+        bubbles: true,
+        composed: true,
+      }));
     }
 
     render() {
-      if (!this._descriptor) return;
-
-      if (this.currentNode && isObject(this.currentNode.schema)) {
-        this.mergeSchema(this.currentNode.schema);
-      }
-
-      const fieldPath = this._descriptor.fieldPath;
       const { publicCtx, secureCtx, localCtx, bindCtx } = this.buildContexts();
 
-      if (fieldPath.length) {
-        const value =
-          fieldPath[0] === "data"
-            ? dig(this.currentData, fieldPath.slice(1))
-            : dig(this.currentNode, fieldPath);
+      const html = this.contract && this.contract.html != null
+        ? String(this.contract.html)
+        : "";
 
-        this.value = value;
-        this.renderValue(value);
-        this.dispatchUpdate();
-        return;
-      }
+      const css = this.contract && this.contract.css != null
+        ? String(this.contract.css)
+        : "";
 
-      if (this.currentNode && this.currentNode.html != null) {
-        const html = String(this.currentNode.html || "");
-        const css = this.currentNode && this.currentNode.css != null
-          ? String(this.currentNode.css)
-          : "";
-
+      if (html) {
         if (html !== this._lastHtml) {
           this.applyTemplate(html);
         }
@@ -1126,15 +1666,8 @@
         return;
       }
 
-      if (Object.keys(bindCtx).length > 0) {
-        this.value = bindCtx;
-        this.renderValue(bindCtx);
-        this.dispatchUpdate();
-        return;
-      }
-
-      this.value = this.currentNode;
-      this.renderValue(this.currentNode);
+      this.value = bindCtx;
+      this.renderValue(bindCtx);
       this.dispatchUpdate();
     }
   }

@@ -1,5 +1,7 @@
 const Gun = require('gun');
+require('gun/sea');
 const http = require('http');
+const path = require('path');
 
 if (Gun.SEA && Gun.SEA.opt) {
   Gun.SEA.opt.stringify = JSON.stringify;
@@ -12,13 +14,28 @@ if (typeof global !== 'undefined' && global.YSON) {
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
 const BIND = process.env.HYPER_BIND_HOST || '0.0.0.0';
+const RADISK_DIR = process.env.HYPER_DATA_DIR || path.join(process.cwd(), '.hyper-data');
+
 let PEERS;
 try { PEERS = JSON.parse(process.env.HYPER_PEERS || '[]'); } catch (_) { PEERS = []; }
 
+// ─── In-memory read cache ─────────────────────────────────────────────
+// This is NOT the source of truth. Gun+radisk is.
+// The cache exists so HTTP GET can respond fast without async Gun chains.
 const graph = Object.create(null);
 const localMsgIds = new Set();
 const seenPutIds = new Map();
 let gun;
+
+// ─── CONTRACT KEY REGISTRY ────────────────────────────────────────────
+const CONTRACT_KEYS = new Set([
+  'manifest', 'schema', 'links', 'actions', 'events',
+  'html', 'css', 'js', 'trust'
+]);
+
+const RESERVED_DATA_KEYS = new Set([
+  'html', 'css', 'js', 'trust'
+]);
 
 function log(tag, ...args) {
   console.log(new Date().toISOString(), `[${tag}]`, ...args);
@@ -27,6 +44,9 @@ function log(tag, ...args) {
 function isObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
+
+// ─── GRAPH CACHE OPERATIONS ───────────────────────────────────────────
+// These only touch the in-memory cache. Gun is written separately.
 
 function parentOf(dp) {
   const parts = String(dp || '').split('.');
@@ -68,17 +88,25 @@ function getNode(dp) {
   return graph[dp] || null;
 }
 
-function deleteNode(dp) {
+function deleteNodeCache(dp) {
   delete graph[dp];
 }
 
-function mergeNode(dp, incoming) {
+function mergeCacheNode(dp, incoming) {
   const ex = graph[dp] || {};
   for (const [k, v] of Object.entries(incoming || {})) {
     if (k === '_' || k === '#' || k === '>') continue;
 
     if (k === 'data' && isObject(v)) {
-      const merged = mergeData(ex.data, v);
+      const sanitized = {};
+      for (const [dk, dv] of Object.entries(v)) {
+        if (RESERVED_DATA_KEYS.has(dk)) {
+          log('GUARD', `rejected reserved key "${dk}" inside data at ${dp}`);
+          continue;
+        }
+        sanitized[dk] = dv;
+      }
+      const merged = mergeData(ex.data, sanitized);
       if (Object.keys(merged).length === 0) delete ex.data;
       else ex.data = merged;
       continue;
@@ -96,6 +124,43 @@ function mergeNode(dp, incoming) {
   graph[dp] = ex;
   return ex;
 }
+
+// ─── CONTRACT VALIDATION ──────────────────────────────────────────────
+
+function validateContract(dp, node) {
+  const warnings = [];
+  if (!node) return warnings;
+
+  if (node.manifest) {
+    if (!node.manifest.name) warnings.push(`[${dp}] manifest missing "name"`);
+    if (!node.manifest.version) warnings.push(`[${dp}] manifest missing "version"`);
+  }
+
+  if (node.schema) {
+    for (const ns of ['public', 'secure', 'local']) {
+      if (node.schema[ns] && !isObject(node.schema[ns])) {
+        warnings.push(`[${dp}] schema.${ns} is not an object`);
+      }
+    }
+  }
+
+  if (isObject(node.actions)) {
+    for (const [name, spec] of Object.entries(node.actions)) {
+      if (!isObject(spec)) warnings.push(`[${dp}] action "${name}" has no spec object`);
+    }
+  }
+
+  if (isObject(node.events)) {
+    for (const [name, spec] of Object.entries(node.events)) {
+      if (!isObject(spec)) warnings.push(`[${dp}] event "${name}" has no spec object`);
+    }
+  }
+
+  for (const w of warnings) log('CONTRACT', w);
+  return warnings;
+}
+
+// ─── NODE RESPONSE BUILDING ──────────────────────────────────────────
 
 function nodeForRead(node) {
   if (!node) return null;
@@ -163,6 +228,8 @@ function nearestDataNode(dp) {
   return null;
 }
 
+// ─── GUN INTEGRATION ──────────────────────────────────────────────────
+
 function dotToScenePath(dp) {
   const parts = dp.split('.');
   return { root: parts[0], scenePath: parts.length > 1 ? parts.slice(1).join('/') : '__root__' };
@@ -217,7 +284,6 @@ function gunPut(dp, data) {
   const id = 'srv_' + Math.random().toString(36).slice(2, 11);
   const msg = { put, '#': id };
   localMsgIds.add(id);
-  log('GUN-PUT', dp, JSON.stringify(data));
   gun._.on('in', msg);
   gun._.on('out', msg);
   return id;
@@ -283,7 +349,8 @@ function ingestPutMessage(msg) {
     if (!dp) continue;
     const clean = cleanGunNode(msg.put[soul], msg.put);
     if (!clean || !Object.keys(clean).length) continue;
-    mergeNode(dp, clean);
+    // Only update the read cache — Gun already has the data
+    mergeCacheNode(dp, clean);
   }
 }
 
@@ -297,6 +364,38 @@ function initGunSync() {
     this.to.next(msg);
   });
 }
+
+// ─── CACHE WARM-UP FROM RADISK ────────────────────────────────────────
+// The cache fills naturally as data flows through ingestPutMessage
+// from Gun's wire protocol. For HTTP reads that arrive before the
+// cache is warm, resolveAsync falls back to a direct Gun read.
+
+function resolveAsync(dp) {
+  return new Promise((resolve) => {
+    const { root, scenePath } = dotToScenePath(dp);
+    const timeout = setTimeout(() => resolve(null), 2000);
+
+    gun.get(root).get('scene').get(scenePath).once((data) => {
+      clearTimeout(timeout);
+      if (!data) return resolve(null);
+
+      const cleaned = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (k === '_' || k === '#' || k === '>') continue;
+        if (v !== null && v !== undefined) cleaned[k] = v;
+      }
+
+      if (Object.keys(cleaned).length) {
+        mergeCacheNode(dp, cleaned);
+        resolve(cleaned);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// ─── QUERY PARSING ────────────────────────────────────────────────────
 
 function parseMaybeJSON(value) {
   if (value === '') return '';
@@ -328,40 +427,23 @@ function parseIntentQuery(searchParams) {
 
 function resolveTargetInfo(rawPath) {
   let raw = String(rawPath || '');
-
   raw = raw.replace(/^[$/]+/, '');
-
   const q = raw.indexOf('?');
   if (q !== -1) raw = raw.slice(0, q);
-
   const h = raw.indexOf('#');
   if (h !== -1) raw = raw.slice(0, h);
-
   if (raw.endsWith('.stream')) raw = raw.slice(0, -7);
 
   const parts = raw.split('.').filter(Boolean);
-  if (!parts.length) {
-    return { path: raw, nodeDp: raw, fieldPath: [] };
-  }
+  if (!parts.length) return { path: raw, nodeDp: raw, fieldPath: [] };
 
   const root = parts[0];
   const rest = parts.slice(1);
-
-  const FIELD_NAMES = new Set([
-    'data',
-    'html',
-    'css',
-    'js',
-    'fixed',
-    'layer'
-  ]);
+  const FIELD_NAMES = new Set(['data', 'html', 'css', 'js', 'fixed', 'layer']);
 
   let fieldStart = -1;
   for (let i = 0; i < rest.length; i++) {
-    if (FIELD_NAMES.has(rest[i])) {
-      fieldStart = i;
-      break;
-    }
+    if (FIELD_NAMES.has(rest[i])) { fieldStart = i; break; }
   }
 
   const nodeSegs = fieldStart === -1 ? rest : rest.slice(0, fieldStart);
@@ -374,6 +456,8 @@ function resolveTargetInfo(rawPath) {
   };
 }
 
+// ─── HTTP HELPERS ─────────────────────────────────────────────────────
+
 function relayMeta(origin) {
   const roots = Array.from(new Set(Object.keys(graph).map(k => k.split('.')[0]))).sort();
   return {
@@ -382,6 +466,8 @@ function relayMeta(origin) {
     bind: BIND,
     port: PORT,
     peers: PEERS.slice(),
+    persistence: 'radisk',
+    dataDir: RADISK_DIR,
     _links: Object.fromEntries(roots.map(r => [r, pathURL(origin, r)])),
   };
 }
@@ -419,19 +505,15 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
 
   var gun;
   try {
-    // Smart Connection Pooling: Check if parent window already has Gun
     if (window.parent && window.parent.$gun) {
       gun = window.parent.$gun;
-      console.log('[STREAM FIX] Reusing parent Gun connection for: ${dp}');
     } else {
       gun = Gun({ peers: peers });
       window.$gun = gun;
-      console.log('[STREAM FIX] Booted isolated Gun connection for: ${dp}');
     }
   } catch(e) {
     gun = Gun({ peers: peers });
     window.$gun = gun;
-    console.log('[STREAM FIX] Booted isolated Gun connection (CORS fallback) for: ${dp}');
   }
 
   var app = document.getElementById('app');
@@ -449,10 +531,6 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
   var currentNode = {};
   var currentData = {};
   var boundCtx = {};
-
-  function log(tag, value){
-    try { console.log('[STREAM FIX]', tag, value); } catch (_) {}
-  }
 
   function isObject(v){
     return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -472,9 +550,7 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
 
   function mergeInto(dst, src){
     if (!src || typeof src !== 'object') return;
-    Object.keys(src).forEach(function(k){
-      dst[k] = src[k];
-    });
+    Object.keys(src).forEach(function(k){ dst[k] = src[k]; });
   }
 
   function dig(v, path, start){
@@ -490,17 +566,14 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
     var nodes = root.querySelectorAll('[data-bind-text],[data-bind-html],[data-bind-style]');
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
-
       if (el.dataset.bindText) {
         var tv = dig(data, String(el.dataset.bindText).split('.'), 0);
         if (tv !== undefined) el.textContent = String(tv);
       }
-
       if (el.dataset.bindHtml) {
         var hv = dig(data, String(el.dataset.bindHtml).split('.'), 0);
         if (hv !== undefined) el.innerHTML = String(hv);
       }
-
       if (el.dataset.bindStyle) {
         var pairs = el.dataset.bindStyle.split(';');
         for (var j = 0; j < pairs.length; j++) {
@@ -514,13 +587,9 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
   }
 
   function renderValue(v){
-    if (v == null) {
-      app.textContent = '';
-      return;
-    }
+    if (v == null) { app.textContent = ''; return; }
     if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-      app.textContent = String(v);
-      return;
+      app.textContent = String(v); return;
     }
     app.innerHTML = '<pre>' + JSON.stringify(v, null, 2) + '</pre>';
   }
@@ -533,13 +602,11 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
 
   function buildContext(extra){
     var out = {};
-
     mergeInto(out, currentNode && isObject(currentNode.data) ? currentNode.data : null);
     mergeInto(out, currentData && isObject(currentData) ? currentData : null);
     mergeInto(out, literalCtx && isObject(literalCtx) ? literalCtx : null);
     mergeInto(out, boundCtx && isObject(boundCtx) ? boundCtx : null);
     mergeInto(out, extra && isObject(extra) ? extra : null);
-
     return out;
   }
 
@@ -558,21 +625,14 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
     try {
       setHyperContext(ctx);
       new AsyncFunction(String(currentNode.js))();
-    } catch (e) {
-      console.error('[STREAM NODE JS FAIL]', e);
-    }
+    } catch (e) { console.error('[STREAM NODE JS FAIL]', e); }
   }
 
   function render(){
     if (fieldPath.length) {
-      if (fieldPath[0] === 'data') {
-        renderValue(dig(currentData, fieldPath, 1));
-        return;
-      }
-      renderValue(dig(currentNode, fieldPath, 0));
-      return;
+      if (fieldPath[0] === 'data') { renderValue(dig(currentData, fieldPath, 1)); return; }
+      renderValue(dig(currentNode, fieldPath, 0)); return;
     }
-
     if (currentNode && currentNode.html != null) {
       app.innerHTML = String(currentNode.html);
       var ctx = buildContext();
@@ -582,12 +642,9 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
       bindData(app, buildContext());
       return;
     }
-
     if (currentNode && currentNode.data !== undefined) {
-      renderValue(buildContext(currentNode.data));
-      return;
+      renderValue(buildContext(currentNode.data)); return;
     }
-
     renderValue(currentNode);
   }
 
@@ -597,30 +654,17 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
     var scenePath = parts.length > 1 ? parts.slice(1).join('/') : '__root__';
     var fp = info.fieldPath || [];
 
-    log('binding:init', { name:name, info:info });
-
     if (!fp.length) {
       var state = { node: {}, data: {} };
-
       function emitWhole(){
         var whole = {};
         mergeInto(whole, clean(state.node) || {});
         if (isObject(state.data)) whole.data = clean(state.data) || {};
         boundCtx[name] = whole;
-        log('binding:whole', { name:name, value:whole });
         render();
       }
-
-      gun.get(root).get('scene').get(scenePath).on(function(node){
-        state.node = node;
-        emitWhole();
-      });
-
-      gun.get(root).get('scene').get(scenePath).get('data').on(function(d){
-        state.data = d;
-        emitWhole();
-      });
-
+      gun.get(root).get('scene').get(scenePath).on(function(node){ state.node = node; emitWhole(); });
+      gun.get(root).get('scene').get(scenePath).get('data').on(function(d){ state.data = d; emitWhole(); });
       return;
     }
 
@@ -630,7 +674,6 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
         var out = fp.length > 1 ? dig(base, fp, 1) : base;
         if (out === undefined) return;
         boundCtx[name] = out;
-        log('binding:data', { name:name, value:out });
         render();
       });
       return;
@@ -640,7 +683,6 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
       chainFor(root, scenePath, fp).on(function(v){
         if (v === undefined) return;
         boundCtx[name] = v;
-        log('binding:leaf', { name:name, value:v });
         render();
       });
       return;
@@ -651,7 +693,6 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
       var out = dig(cleaned, fp, 0);
       if (out === undefined) return;
       boundCtx[name] = out;
-      log('binding:nested', { name:name, value:out });
       render();
     });
   }
@@ -662,10 +703,7 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
       gun.get(nodeRoot).get('scene').get(key).put({
         data: JSON.stringify(payload || {})
       }, function(ack){
-        if (ack && ack.err) {
-          reject(new Error(ack.err));
-          return;
-        }
+        if (ack && ack.err) { reject(new Error(ack.err)); return; }
         resolve(ack || { ok: true });
       });
     });
@@ -673,16 +711,30 @@ pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word}
 
   gun.get(nodeRoot).get('scene').get(nodeScenePath).on(function(node){
     currentNode = clean(node) || {};
-    log('node:update', currentNode);
     render();
   });
 
-  if (bindRoot && bindScenePath) {
-    gun.get(bindRoot).get('scene').get(bindScenePath).get('data').on(function(d){
+  // When fieldPath targets data (e.g. data.temp), always subscribe to
+  // the node's own data child. When bindRoot/bindScenePath are set
+  // (from nearestDataNode), also subscribe to that for bound data.
+  // This ensures field-level streams work even if the relay cache
+  // wasn't warm when the HTML was generated.
+  if (fieldPath.length && fieldPath[0] === 'data') {
+    gun.get(nodeRoot).get('scene').get(nodeScenePath).get('data').on(function(d){
       currentData = clean(d) || {};
-      log('data:update', currentData);
       render();
     });
+  }
+
+  if (bindRoot && bindScenePath) {
+    var isSameNode = (bindRoot === nodeRoot && bindScenePath === nodeScenePath);
+    if (!isSameNode) {
+      gun.get(bindRoot).get('scene').get(bindScenePath).get('data').on(function(d){
+        currentData = clean(d) || {};
+        render();
+      });
+    }
+  }
   }
 
   Object.keys(bindingTargets).forEach(function(name){
@@ -709,10 +761,7 @@ function sendRaw(res, value) {
   if (res.headersSent) return;
   const str = String(value);
   const type = str.trim().startsWith('<') ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8';
-  res.writeHead(200, {
-    'Content-Type': type,
-    'Access-Control-Allow-Origin': '*',
-  });
+  res.writeHead(200, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*' });
   res.end(str);
 }
 
@@ -730,16 +779,26 @@ function stripSuffix(path, suffix) {
 
 function serverWrite(path, payload) {
   const existed = !!getNode(path);
-  mergeNode(path, payload);
+  const warnings = validateContract(path, payload);
+
+  // Update read cache
+  mergeCacheNode(path, payload);
+
+  // Write to Gun — radisk persists automatically
   gunPut(path, graph[path] || payload);
-  return { ok: true, existed_before: existed };
+
+  return {
+    ok: true,
+    existed_before: existed,
+    contract_warnings: warnings.length ? warnings : undefined,
+  };
 }
 
 function serverDelete(path) {
   const removed = descendantsOf(path);
   for (const dp of removed) {
     gunNullOut(dp);
-    deleteNode(dp);
+    deleteNodeCache(dp);
   }
   return { ok: true, removed: removed.length };
 }
@@ -759,10 +818,12 @@ function clearRoot(rootName) {
   const paths = descendantsOf(rootName);
   for (const dp of paths) {
     gunNullOut(dp);
-    deleteNode(dp);
+    deleteNodeCache(dp);
   }
   return { ok: true, cleared: paths.length };
 }
+
+// ─── HTTP SERVER ──────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -782,13 +843,34 @@ const server = http.createServer(async (req, res) => {
     return res.end('<pre>' + JSON.stringify(relayMeta(parsed.origin), null, 2) + '</pre>');
   }
 
-  const apiMatch = pathname.match(/^\/([^/]+)\/api\/(snapshot|clear|keys)$/);
+  const apiMatch = pathname.match(/^\/([^/]+)\/api\/(snapshot|clear|keys|validate)$/);
   if (apiMatch) {
     const root = decodeURIComponent(apiMatch[1]);
     const op = apiMatch[2];
     if (op === 'snapshot' && req.method === 'GET') return sendJson(res, snapshotForRoot(root));
     if (op === 'clear' && req.method === 'POST') return sendJson(res, clearRoot(root));
     if (op === 'keys' && req.method === 'GET') return sendJson(res, Object.keys(snapshotForRoot(root)).sort());
+    if (op === 'validate' && req.method === 'GET') {
+      const allWarnings = [];
+      for (const dp of descendantsOf(root)) {
+        const node = getNode(dp);
+        if (node) allWarnings.push(...validateContract(dp, node));
+      }
+      return sendJson(res, {
+        ok: allWarnings.length === 0,
+        warnings: allWarnings,
+        checked: descendantsOf(root).length,
+      });
+    }
+  }
+
+  // Persistence status
+  if (pathname === '/api/persist/status' && req.method === 'GET') {
+    return sendJson(res, {
+      engine: 'radisk',
+      dataDir: RADISK_DIR,
+      cachedNodes: Object.keys(graph).length,
+    });
   }
 
   const raw = decodeURIComponent(pathname.slice(1));
@@ -806,7 +888,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET') {
-    const resolved = resolve(raw, parsed.origin);
+    // Try cache first, fall back to async Gun/radisk read
+    let resolved = resolve(raw, parsed.origin);
+    if (!resolved) {
+      const asyncResult = await resolveAsync(raw);
+      if (asyncResult) {
+        resolved = resolve(raw, parsed.origin);
+      }
+    }
     if (!resolved) return sendJson(res, { error: 'not found', path: raw }, 404);
     if (wantsJSON || resolved.type === 'node' || resolved.type === 'json') return sendJson(res, resolved.data);
     return sendRaw(res, resolved.data);
@@ -827,9 +916,21 @@ const server = http.createServer(async (req, res) => {
   return sendJson(res, { error: 'method not allowed' }, 405);
 });
 
-gun = Gun({ web: server, peers: PEERS });
+// ─── BOOT ─────────────────────────────────────────────────────────────
+// Gun with radisk: file option tells Gun where to persist on disk.
+// On restart, radisk loads persisted data and feeds it through the
+// wire protocol, which populates the in-memory cache via ingestPutMessage.
+gun = Gun({
+  web: server,
+  peers: PEERS,
+  file: RADISK_DIR,
+  radisk: true,
+});
+
 initGunSync();
+log('CACHE', 'cache will warm from radisk + Gun traffic');
 
 server.listen(PORT, BIND, () => {
   log('HTTP', 'listening on http://' + BIND + ':' + PORT);
+  log('PERSIST', 'radisk data dir:', RADISK_DIR);
 });

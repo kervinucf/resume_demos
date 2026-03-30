@@ -26,6 +26,21 @@ log = logging.getLogger(__name__)
 
 MDNS_TYPE = "_hyper._tcp.local."
 
+# ─── CONTRACT KEY REGISTRY ─────────────────────────────────────────────
+# Must match the relay's CONTRACT_KEYS exactly.
+CONTRACT_KEYS = frozenset([
+    "manifest", "schema", "links", "actions", "events",
+    "html", "css", "js", "trust",
+])
+
+# Keys that must never appear inside a data object
+RESERVED_DATA_KEYS = frozenset(["html", "css", "js", "trust"])
+
+
+class ContractWarning(UserWarning):
+    """Raised when a node's contract is incomplete or malformed."""
+    pass
+
 
 class Action(dict):
     def __init__(self, name: str, fields: dict):
@@ -39,6 +54,138 @@ class Action(dict):
 class LiveBind(str):
     pass
 
+
+# ─── CONTRACT VALIDATION ──────────────────────────────────────────────
+
+def validate_contract(node: Dict[str, Any], path: str = "<unknown>") -> List[str]:
+    """Validate a node's contract before publishing. Returns list of warnings."""
+    warnings: List[str] = []
+
+    manifest = node.get("manifest")
+    if manifest:
+        if not manifest.get("name"):
+            warnings.append(f"[{path}] manifest missing 'name'")
+        if not manifest.get("version"):
+            warnings.append(f"[{path}] manifest missing 'version'")
+    else:
+        warnings.append(f"[{path}] no manifest defined")
+
+    schema = node.get("schema")
+    if schema:
+        for ns in ("public", "secure", "local"):
+            val = schema.get(ns)
+            if val is not None and not isinstance(val, dict):
+                warnings.append(f"[{path}] schema.{ns} is not a dict")
+    else:
+        warnings.append(f"[{path}] no schema defined")
+
+    actions = node.get("actions")
+    if isinstance(actions, dict):
+        for name, spec in actions.items():
+            if not isinstance(spec, dict):
+                warnings.append(f"[{path}] action '{name}' has no spec dict")
+
+    events = node.get("events")
+    if isinstance(events, dict):
+        for name, spec in events.items():
+            if not isinstance(spec, dict):
+                warnings.append(f"[{path}] event '{name}' has no spec dict")
+
+    # Check for reserved keys inside data
+    data = node.get("data")
+    if isinstance(data, dict):
+        for key in RESERVED_DATA_KEYS:
+            if key in data:
+                warnings.append(f"[{path}] data contains reserved key '{key}' — will be stripped")
+
+    return warnings
+
+
+def sanitize_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove reserved keys from a data dict to prevent misrouting."""
+    if not isinstance(data, dict):
+        return data
+    return {k: v for k, v in data.items() if k not in RESERVED_DATA_KEYS}
+
+
+def build_node(
+    *,
+    manifest: Optional[Dict[str, Any]] = None,
+    schema: Optional[Dict[str, Any]] = None,
+    html: str = "",
+    css: str = "",
+    js: str = "",
+    trust: str = "public",
+    actions: Optional[Dict[str, Any]] = None,
+    events: Optional[Dict[str, Any]] = None,
+    links: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a well-formed node payload with contract validation."""
+    node: Dict[str, Any] = {}
+
+    if manifest:
+        node["manifest"] = manifest
+    if schema:
+        node["schema"] = schema
+    if html:
+        node["html"] = html
+    if css:
+        node["css"] = css
+    if js:
+        node["js"] = js
+    if trust != "public":
+        node["trust"] = trust
+    if actions:
+        node["actions"] = actions
+    if events:
+        node["events"] = events
+    if links:
+        node["links"] = links
+    if data:
+        node["data"] = sanitize_data(data)
+
+    return node
+
+
+def publish_app(hc: "HyperClient", path: str, app: Dict[str, Any], *, strict: bool = False) -> bool:
+    """
+    Publish a node app through HyperClient.
+
+    If strict=True, raises ContractWarning on validation issues.
+    Otherwise logs warnings and publishes anyway.
+    """
+    node = {
+        "manifest": app.get("manifest", {}),
+        "schema": app.get("schema", {}),
+        "links": app.get("links", {}),
+        "actions": app.get("actions", {}),
+        "events": app.get("events", {}),
+        "html": (app.get("view") or {}).get("html", ""),
+        "css": (app.get("view") or {}).get("css", ""),
+        "js": app.get("behavior", ""),
+        "trust": app.get("trust", "public"),
+    }
+
+    if app.get("data"):
+        node["data"] = sanitize_data(app["data"])
+
+    warnings = validate_contract(node, path)
+    if warnings:
+        for w in warnings:
+            log.warning("CONTRACT: %s", w)
+        if strict:
+            import warnings as _w
+            _w.warn(
+                f"Contract validation failed for '{path}':\n" + "\n".join(warnings),
+                ContractWarning,
+                stacklevel=2,
+            )
+
+    return hc.write(path, data=node)
+
+
+# ─── mDNS HELPERS ──────────────────────────────────────────────────────
 
 def _mdns_ok():
     try:
@@ -120,6 +267,8 @@ def _local_ip():
         return "127.0.0.1"
 
 
+# ─── SSE SUBSCRIPTION ─────────────────────────────────────────────────
+
 class _SSESubscription:
     def __init__(self, url: str, timeout: float = 3600.0):
         self.url = url
@@ -200,6 +349,8 @@ class _SSESubscription:
             self.close()
 
 
+# ─── NODE REFERENCE ────────────────────────────────────────────────────
+
 class _NodeRef:
     def __init__(self, client: "HyperClient", path: str):
         self._client = client
@@ -221,7 +372,7 @@ class _NodeRef:
     ) -> bool:
         payload: Dict[str, Any] = {}
         if data is not None:
-            payload["data"] = data
+            payload["data"] = sanitize_data(data)
         if html is not None:
             payload["html"] = html
         if css is not None:
@@ -270,6 +421,8 @@ class _NodeRef:
         return f"<NodeRef {self.path}>"
 
 
+# ─── HYPER CLIENT ──────────────────────────────────────────────────────
+
 class HyperClient:
     def __init__(
         self,
@@ -282,6 +435,7 @@ class HyperClient:
         peers=None,
         port=8765,
         machine_name=None,
+        data_dir=None,
     ):
         self.root = root
         self.token = token
@@ -296,6 +450,9 @@ class HyperClient:
         self.relay_url = relay_url.rstrip("/") if relay_url else f"http://127.0.0.1:{self.port}"
         self._explicit = [self._gun(p) for p in (peers or [])]
         self.peers: List[str] = []
+
+        # Persistence config — just the data dir for radisk
+        self._data_dir = data_dir
 
     def connect(self):
         remote = self._discover()
@@ -330,8 +487,13 @@ class HyperClient:
         if self._proc and self._proc.poll() is None:
             try:
                 self._proc.terminate()
+                # Give it time to write final snapshot
+                self._proc.wait(timeout=5)
             except Exception:
-                pass
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
         self._proc = None
 
     def stop_relay(self):
@@ -348,6 +510,21 @@ class HyperClient:
     @property
     def browser_url(self):
         return f"http://localhost:{self.port}/{self.root}"
+
+    # ─── Persistence API ───────────────────────────────────────────────
+
+    def persist_status(self) -> Dict[str, Any]:
+        """Get persistence status from the relay (radisk engine)."""
+        return self._req_url(f"{self.relay_url}/api/persist/status", "GET") or {}
+
+    # ─── Validation API ────────────────────────────────────────────────
+
+    def validate_root(self, root: Optional[str] = None) -> Dict[str, Any]:
+        """Validate all contracts under a root. Returns warnings."""
+        r = root or self.root
+        return self._req_url(f"{self.relay_url}/{urllib.parse.quote(r, safe='.')}/api/validate", "GET") or {}
+
+    # ─── Node operations ───────────────────────────────────────────────
 
     def at(self, path: str = "") -> _NodeRef:
         return _NodeRef(self, path)
@@ -427,6 +604,9 @@ class HyperClient:
         return self._req_url(self.search_url(path, q=q, limit=limit, full_path=full_path), "GET")
 
     def write(self, path, **fields):
+        # Sanitize data if present
+        if "data" in fields and isinstance(fields["data"], dict):
+            fields["data"] = sanitize_data(fields["data"])
         return self.write_path(path, fields)
 
     def read(self, path):
@@ -489,7 +669,7 @@ class HyperClient:
     def mount(self, key, *, html="", css="", js="", fixed=False, layer=0, data=None, **kw):
         payload = {"html": html, "css": css, "js": js, "fixed": fixed, "layer": layer, **kw}
         if data is not None:
-            payload["data"] = data
+            payload["data"] = sanitize_data(data) if isinstance(data, dict) else data
         return self.write_path(key, payload)
 
     def _encode_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -543,6 +723,11 @@ class HyperClient:
         env["PORT"] = str(self.port)
         env["HYPER_BIND_HOST"] = "127.0.0.1" if self.discovery == "local" else "0.0.0.0"
         env["HYPER_PEERS"] = json.dumps(self.peers)
+
+        # Persistence: radisk data directory
+        if self._data_dir:
+            env["HYPER_DATA_DIR"] = str(self._data_dir)
+
         self._proc = subprocess.Popen(
             [self._find_node(), str(self._relay_script)],
             stdout=sys.stdout,
@@ -553,41 +738,32 @@ class HyperClient:
         self._wait()
 
     def _wait(self, timeout: float = 15.0) -> None:
-        import socket
-        import time
+        import socket as _socket
+        import time as _time
 
-        deadline = time.time() + timeout
+        deadline = _time.time() + timeout
         host = "127.0.0.1"
         port = int(self.port)
         last_err = None
         attempt = 0
 
-        print(f"[CLIENT WAIT] waiting for TCP relay {host}:{port} timeout={timeout}s")
-
-        while time.time() < deadline:
+        while _time.time() < deadline:
             attempt += 1
 
             if self._proc and self._proc.poll() is not None:
                 raise RuntimeError(f"Relay exited early with code {self._proc.returncode}")
 
             try:
-                with socket.create_connection((host, port), timeout=0.5):
-                    print(f"[CLIENT WAIT] probe #{attempt} connected")
+                with _socket.create_connection((host, port), timeout=0.5):
                     return
             except Exception as exc:
                 last_err = exc
-                print(f"[CLIENT WAIT] probe #{attempt} failed: {exc!r}")
 
-            time.sleep(0.1)
+            _time.sleep(0.1)
 
         raise RuntimeError(f"Timed out waiting for relay (last error: {last_err!r})")
 
     def _find_node(self):
-        for name in ("node", "nodejs"):
-            path = shutil.which(name) if 'shutil' in globals() else None
-            if path:
-                return path
-        # delayed import so module still loads in limited envs
         import shutil
         for name in ("node", "nodejs"):
             path = shutil.which(name)
@@ -652,4 +828,3 @@ class HyperClient:
             except Exception:
                 payload = raw
             raise RuntimeError(f"HTTP {e.code}: {payload}") from e
-

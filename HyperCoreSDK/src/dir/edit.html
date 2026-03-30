@@ -3,48 +3,26 @@
 <head>
   <meta charset="utf-8"/>
   <title>Plug and Play Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #f3f4f6;
-      font-family: system-ui, sans-serif;
-    }
-
     body {
-      padding: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 10px;
+      padding: 10px;
+      background: #f0f0f0;
+      font-family: system-ui, sans-serif;
     }
   </style>
 
-  <script>
-    window.$secureContext = {
-      user: {
-        id: "user-123",
-        name: "Bob",
-        role: "admin",
-        units: "°F"
-      },
-      prefs: {
-        theme: "midnight",
-        cardBg: "#0f172a",
-        textColor: "#e2e8f0"
-      },
-      ui: {
-        noteDisplay: "block",
-        banner: "Private context active"
-      }
-    };
-  </script>
-
   <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+
   <script src="./hyper-node.js"></script>
 </head>
 <body>
-  <hyper-node
-    trust="trusted"
-    src="http://127.0.0.1:8766/demo111.weather.nyc.panel.stream?city=%24demo111.weather.nyc.data.city&temp=%24demo111.weather.nyc.data.temp&cond=%24demo111.weather.nyc.data.cond&units=%24demo111.weather.nyc.data.units&note=%24demo111.weather.nyc.data.note&_v=7">
-  </hyper-node>
-</body>
+  <hyper-node src="http://127.0.0.1:8766/demo111.weather.nyc.panel.stream?city=%24demo111.weather.nyc.data.city&temp=%24demo111.weather.nyc.data.temp&cond=%24demo111.weather.nyc.data.cond&units=%C2%B0F&note=%24demo111.weather.nyc.data.temp&_v=5"></hyper-node>
+  <hyper-node src="http://127.0.0.1:8766/demo111.weather.nyc.panel.stream?city=%24demo111.weather.nyc.data.city&temp=%24demo111.weather.nyc.data.temp&cond=%24demo111.weather.nyc.data.cond&units=%C2%B0F&note=%24demo111.weather.nyc.data.temp&_v=5"></hyper-node>
+
+<hyper-node src="http://127.0.0.1:8766/demo111.weather.nyc.data.temp.stream"></hyper-node>
+<hyper-node src="http://127.0.0.1:8766/demo111.weather.nyc.data.temp.stream"></hyper-node>
+<hyper-node src="http://127.0.0.1:8766/demo111.weather.nyc.data.temp.stream"></hyper-node></body>
 </html>
