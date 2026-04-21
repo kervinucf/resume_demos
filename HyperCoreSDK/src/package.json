@@ -7,6 +7,8 @@
     "start": "node relay.js"
   },
   "dependencies": {
-    "gun": "^0.2020.1241"
+    "better-sqlite3": "^12.8.0",
+    "gun": "^0.2020.1241",
+    "sql.js": "^1.14.1"
   }
 }
