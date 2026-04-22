@@ -15,7 +15,8 @@ URL = os.getenv("HYPER_URL", DEFAULT_URL)
 DATA_DIR = str(Path(os.getenv("HYPER_DATA_DIR", Path.cwd() / ".hyper-data")).expanduser().resolve())
 
 def _define_relay_script() -> None:
-    os.environ["HYPER_RELAY_SCRIPT"] = "/Users/mini/Desktop/code/portfolio/HyperCoreSDK/src/relay.js"
+    project_folder = Path.cwd().parent.parent.parent
+    os.environ["HYPER_RELAY_SCRIPT"] = f"{project_folder}/HyperCoreSDK/src/relay.js"
 
 
 def create_hyper_server(url=URL, root=SOURCE_ROOT, data_path=DATA_DIR) -> HyperClient:

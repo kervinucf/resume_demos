@@ -1,356 +1,79 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Mapping
+import re
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any
 
-from ___.HyperCoreSDK import HyperClient
-from ___.HyperCoreSDK import HyperCoreNode
-
-def _parse_iso_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except Exception:
-        return None
+_SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
+_DASHES_RE = re.compile(r"-{2,}")
 
 
-def _read_value(source: Any, key: str, default: Any = None) -> Any:
-    if isinstance(source, Mapping):
-        return source.get(key, default)
-    return getattr(source, key, default)
-
-
-def _clean_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _event_sub_paths(*, location_key: str) -> list[str]:
-    return [
-        "current",
-        str(location_key or "").strip(),
-    ]
-
-
-def _state_sub_paths(*, location_key: str) -> list[str]:
-    return [
-        "state",
-        "current",
-        str(location_key or "").strip(),
-    ]
+def slugify(value: str, *, fallback: str = "observation") -> str:
+    text = _SLUG_RE.sub("-", str(value or "").strip().lower())
+    text = _DASHES_RE.sub("-", text).strip("-")
+    return text or fallback
 
 
 @dataclass(frozen=True)
-class WeatherEvent(HyperCoreNode):
+class WeatherObservation:
+    location_key: str          # e.g. "new-york-city-5128581"
+    location_path: str         # e.g. "geo.locations.new-york-city-5128581"
+    name: str
     lat: float
     lon: float
-    name: str
-    country_code: str | None
-    condition: str
+    country_code: str
+    country_flag_emoji: str
     temperature: float
+    condition: str
+    weather_code: int | None
     wind_speed: float | None
     precipitation: float | None
-    rain: float | None
-    showers: float | None
-    snowfall: float | None
-    weather_code: int | None
     local_time: str
-    fetched_at: str
-    location_path: str | None = None
+    observed_at: str           # ISO-8601 UTC
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "lat", float(self.lat))
-        object.__setattr__(self, "lon", float(self.lon))
-        object.__setattr__(self, "name", str(self.name or "").strip())
-        object.__setattr__(self, "country_code", _clean_text(self.country_code))
-        object.__setattr__(self, "condition", str(self.condition or "").strip())
-        object.__setattr__(self, "temperature", float(self.temperature))
-        object.__setattr__(self, "wind_speed", None if self.wind_speed is None else float(self.wind_speed))
-        object.__setattr__(self, "precipitation", None if self.precipitation is None else float(self.precipitation))
-        object.__setattr__(self, "rain", None if self.rain is None else float(self.rain))
-        object.__setattr__(self, "showers", None if self.showers is None else float(self.showers))
-        object.__setattr__(self, "snowfall", None if self.snowfall is None else float(self.snowfall))
-        object.__setattr__(self, "weather_code", None if self.weather_code is None else int(self.weather_code))
-        object.__setattr__(self, "local_time", str(self.local_time or "").strip())
-        object.__setattr__(self, "fetched_at", str(self.fetched_at or "").strip())
-        object.__setattr__(self, "location_path", _clean_text(self.location_path))
+    def record_key(self) -> str:
+        """
+        Stable, time-partitioned id:
+            <location_key>/<yyyy>/<mm>/<dd>/<hhmmss>
+        Slashes become dots when composed into the record path, giving the
+        hierarchical `weather.history.<loc>.<yyyy>.<mm>.<dd>.<hhmmss>`
+        layout.
+        """
+        dt = datetime.fromisoformat(self.observed_at)
+        return (
+            f"{self.location_key}/"
+            f"{dt.year:04d}/{dt.month:02d}/{dt.day:02d}/"
+            f"{dt.hour:02d}{dt.minute:02d}{dt.second:02d}"
+        )
 
-    def to_kv(self, *, omit_empty: bool = False) -> dict[str, Any]:
-        data = asdict(self)
-        if not omit_empty:
-            return data
+    def latest_key(self) -> str:
+        """Per-location pointer to the most recent observation."""
+        return self.location_key
 
-        out: dict[str, Any] = {}
-        for key, value in data.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            out[key] = value
-        return out
+    def to_dict(self) -> dict[str, Any]:
+        return {"model": "weather-observation", **asdict(self)}
 
-    def as_record(self, **extra: Any) -> dict[str, Any]:
-        data = self.to_kv()
-        data.update(extra)
-        return data
+    def latest_dict(self, history_path: str) -> dict[str, Any]:
+        d = self.to_dict()
+        d["model"] = "weather-latest"
+        d["target"] = history_path
+        return d
 
-    def as_reference(self, *, path: str, **extra: Any) -> dict[str, Any]:
-        data = {
+    def ref_payload(self) -> dict[str, Any]:
+        """
+        Compact snapshot merged into each index entry's `data`. Lets a UI
+        render listings (`NYC 12.4°C · Partly cloudy`) without hydrating
+        the source record.
+        """
+        return {
             "name": self.name,
             "country_code": self.country_code,
-            "condition": self.condition,
+            "country_flag_emoji": self.country_flag_emoji,
             "temperature": self.temperature,
-            "local_time": self.local_time,
-            "path": path,
+            "condition": self.condition,
+            "weather_code": self.weather_code,
+            "observed_at": self.observed_at,
+            "lat": self.lat,
+            "lon": self.lon,
         }
-        if self.location_path:
-            data["location_path"] = self.location_path
-        data.update(extra)
-        return data
-
-    @classmethod
-    def properties(cls) -> list[str]:
-        return [field.name for field in fields(cls)]
-
-    @classmethod
-    def from_mapping(
-        cls,
-        source: Mapping[str, Any] | Any,
-        *,
-        field_map: Mapping[str, str] | None = None,
-        transforms: Mapping[str, Callable[[Any, Any], Any]] | None = None,
-        defaults: Mapping[str, Any] | None = None,
-        strict: bool = False,
-    ) -> "WeatherEvent":
-        mapped: dict[str, Any] = {}
-        field_map = dict(field_map or {})
-        transforms = dict(transforms or {})
-        defaults = dict(defaults or {})
-
-        for field_name in cls.properties():
-            source_key = field_map.get(field_name, field_name)
-            value = _read_value(source, source_key, defaults.get(field_name))
-
-            if field_name in transforms:
-                value = transforms[field_name](value, source)
-
-            if value is None and field_name in {"lat", "lon", "name", "condition", "temperature", "local_time", "fetched_at"} and strict:
-                raise ValueError(f"Missing required field '{field_name}'")
-
-            mapped[field_name] = value
-
-        return cls(**mapped)
-
-    @classmethod
-    def from_source(
-        cls,
-        source: Any,
-        *,
-        mapper: Callable[[Any], Mapping[str, Any]],
-    ) -> "WeatherEvent":
-        return cls.from_mapping(mapper(source))
-
-    def storage_key(self) -> str:
-        return self.name
-
-    def save_to(
-        self,
-        hyper_client: HyperClient,
-        *,
-        root: str = "weather",
-        location_key: str | None = None,
-        sub_paths: list[str] | None = None,
-    ) -> None:
-        old_root = hyper_client.root
-        try:
-            hyper_client.root = root
-            effective_sub_paths = sub_paths or _event_sub_paths(
-                location_key=location_key or self.storage_key(),
-            )
-            self.commit(
-                hyper_client,
-                sub_paths=effective_sub_paths,
-            )
-        finally:
-            hyper_client.root = old_root
-
-    @classmethod
-    def load_from(
-        cls,
-        hyper_client: HyperClient,
-        *,
-        location_key: str,
-        root: str = "weather",
-        sub_paths: list[str] | None = None,
-    ) -> "WeatherEvent | None":
-        old_root = hyper_client.root
-        try:
-            hyper_client.root = root
-            effective_sub_paths = sub_paths or _event_sub_paths(location_key=location_key)
-            clean_data, metadata = cls.read_out(
-                hyper_client,
-                sub_paths=effective_sub_paths,
-            )
-        finally:
-            hyper_client.root = old_root
-
-        if not clean_data:
-            return None
-
-        try:
-            instance = cls.from_mapping(clean_data, strict=True)
-            object.__setattr__(instance, "_metadata", metadata)
-            return instance
-        except (TypeError, ValueError, KeyError):
-            return None
-
-
-@dataclass(frozen=True)
-class WeatherState(HyperCoreNode):
-    location_name: str
-    country_code: str | None
-    last_checked_at: str
-    refreshed_at: str | None
-    local_time: str | None
-    ok: bool
-    error: str | None
-    location_path: str | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "location_name", str(self.location_name or "").strip())
-        object.__setattr__(self, "country_code", _clean_text(self.country_code))
-        object.__setattr__(self, "last_checked_at", str(self.last_checked_at or "").strip())
-        object.__setattr__(self, "refreshed_at", _clean_text(self.refreshed_at))
-        object.__setattr__(self, "local_time", _clean_text(self.local_time))
-        object.__setattr__(self, "ok", bool(self.ok))
-        object.__setattr__(self, "error", _clean_text(self.error))
-        object.__setattr__(self, "location_path", _clean_text(self.location_path))
-
-    def to_kv(self, *, omit_empty: bool = False) -> dict[str, Any]:
-        data = asdict(self)
-        if not omit_empty:
-            return data
-
-        out: dict[str, Any] = {}
-        for key, value in data.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            out[key] = value
-        return out
-
-    def as_record(self, **extra: Any) -> dict[str, Any]:
-        data = self.to_kv()
-        data.update(extra)
-        return data
-
-    @classmethod
-    def properties(cls) -> list[str]:
-        return [field.name for field in fields(cls)]
-
-    @classmethod
-    def from_mapping(
-        cls,
-        source: Mapping[str, Any] | Any,
-        *,
-        field_map: Mapping[str, str] | None = None,
-        transforms: Mapping[str, Callable[[Any, Any], Any]] | None = None,
-        defaults: Mapping[str, Any] | None = None,
-        strict: bool = False,
-    ) -> "WeatherState":
-        mapped: dict[str, Any] = {}
-        field_map = dict(field_map or {})
-        transforms = dict(transforms or {})
-        defaults = dict(defaults or {})
-
-        for field_name in cls.properties():
-            source_key = field_map.get(field_name, field_name)
-            value = _read_value(source, source_key, defaults.get(field_name))
-
-            if field_name in transforms:
-                value = transforms[field_name](value, source)
-
-            if value is None and field_name in {"location_name", "last_checked_at", "ok"} and strict:
-                raise ValueError(f"Missing required field '{field_name}'")
-
-            mapped[field_name] = value
-
-        return cls(**mapped)
-
-    @classmethod
-    def from_source(
-        cls,
-        source: Any,
-        *,
-        mapper: Callable[[Any], Mapping[str, Any]],
-    ) -> "WeatherState":
-        return cls.from_mapping(mapper(source))
-
-    def save_to(
-        self,
-        hyper_client: HyperClient,
-        *,
-        root: str = "weather",
-        location_key: str | None = None,
-        sub_paths: list[str] | None = None,
-    ) -> None:
-        old_root = hyper_client.root
-        try:
-            hyper_client.root = root
-            effective_sub_paths = sub_paths or _state_sub_paths(
-                location_key=location_key or self.location_name,
-            )
-            self.commit(
-                hyper_client,
-                sub_paths=effective_sub_paths,
-            )
-        finally:
-            hyper_client.root = old_root
-
-    @classmethod
-    def load_from(
-        cls,
-        hyper_client: HyperClient,
-        *,
-        location_key: str,
-        max_age_hours: int = 4,
-        root: str = "weather",
-        sub_paths: list[str] | None = None,
-    ) -> tuple["WeatherState | None", bool]:
-        old_root = hyper_client.root
-        try:
-            hyper_client.root = root
-            effective_sub_paths = sub_paths or _state_sub_paths(location_key=location_key)
-            clean_data, metadata = cls.read_out(
-                hyper_client,
-                sub_paths=effective_sub_paths,
-            )
-        finally:
-            hyper_client.root = old_root
-
-        if not clean_data:
-            return None, True
-
-        try:
-            instance = cls.from_mapping(clean_data, strict=True)
-            object.__setattr__(instance, "_metadata", metadata)
-
-            basis = _parse_iso_datetime(instance.refreshed_at) or _parse_iso_datetime(
-                instance.last_checked_at
-            )
-            if basis is None:
-                return instance, True
-
-            update_required = (
-                datetime.now(timezone.utc) - basis
-            ) >= timedelta(hours=max_age_hours)
-
-            return instance, update_required
-        except (TypeError, ValueError, KeyError):
-            return None, True
