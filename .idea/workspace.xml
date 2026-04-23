@@ -5,21 +5,14 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/app/lib/weather/helpers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/resume_demos.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/resume_demos.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/sports/helpers.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/sports/loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/utils/dtos/NewsEvent.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/utils/dtos/SportsEvent.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/geo/dto.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/geo/load_locations.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/weather/dto.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/dto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/weather/load_weather.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/load_weather.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Currency.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Location.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/dtos/Location.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/News.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Sports.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Weather.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/server.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/news/load_news.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/weather/helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Weather.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/dtos/WeatherEvent.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -61,7 +54,7 @@
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "git-widget-placeholder": "main",
     "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "/Users/kervin/Desktop/code/resume_demos/app/lib/weather",
+    "last_opened_file_path": "/Users/kervin/Desktop/code/resume_demos/app/lib/news",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
     "vue.rearranger.settings.migration": "true"
@@ -69,12 +62,15 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/app/lib/news" />
+      <recent name="$PROJECT_DIR$/app/lib" />
       <recent name="$PROJECT_DIR$/app/lib/weather" />
       <recent name="$PROJECT_DIR$/app/lib/geo" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
-      <recent name="$PROJECT_DIR$/app/lib/news" />
+      <recent name="$PROJECT_DIR$/app/utils/dtos/___" />
       <recent name="$PROJECT_DIR$/app/utils/dtos" />
+      <recent name="$PROJECT_DIR$/app/lib/news" />
       <recent name="C:\Users\Home\Desktop\code\resume_demos\HyperCoreSDK" />
       <recent name="C:\Users\Home\Desktop\code\resume_demos" />
     </key>
@@ -232,7 +228,7 @@
       <workItem from="1776817743845" duration="2101000" />
       <workItem from="1776819933737" duration="2422000" />
       <workItem from="1776822444729" duration="53000" />
-      <workItem from="1776822509293" duration="1310000" />
+      <workItem from="1776822509293" duration="5785000" />
     </task>
     <servers />
   </component>

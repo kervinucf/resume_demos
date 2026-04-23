@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import certifi
 
 from app.utils.dtos.Location import Location
-from app.utils.dtos.Weather import WeatherObservation
+from app.utils.dtos.WeatherEvent import WeatherObservation
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
