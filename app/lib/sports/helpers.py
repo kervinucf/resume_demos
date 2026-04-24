@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from app.utils.dtos.SportsGame import GameTeam, SportsGame
+from app.utils.dtos.SportsEvent import GameTeam, SportsGame
 
 
 def now_utc() -> datetime:

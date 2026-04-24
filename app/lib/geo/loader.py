@@ -99,8 +99,20 @@ LOCATION_INDEXES: list[ValueIndexSpec] = [
             "lon": "lon",
         },
     ),
+    ValueIndexSpec(
+        name="population_band",
+        path="population_band",
+        normalize="none",
+        link_projections={
+            "name": "name",
+            "country_code": "country_code",
+            "country_flag_emoji": "country_flag_emoji",
+            "lat": "lat",
+            "lon": "lon",
+            "population": "population",
+        },
+    ),
 ]
-
 
 # ---------------------------------------------------------------------------
 # Entry point

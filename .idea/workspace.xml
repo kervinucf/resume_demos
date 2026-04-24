@@ -5,14 +5,19 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/app/lib/sports/helpers.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/lib/sports/loader.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/utils/dtos/NewsEvent.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/utils/dtos/SportsEvent.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/readme.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/requirements.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/news/load_news.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/weather/helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/helpers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Weather.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/dtos/WeatherEvent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/geo/helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/geo/helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/geo/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/geo/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/news/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/sports/helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/sports/helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/sports/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/sports/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/weather/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/utils/clients/espn.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/clients/espn.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/utils/dtos/Location.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/dtos/Location.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,11 +46,16 @@
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "Python.client.executor": "Run",
+    "Python.helpers.executor": "Run",
     "Python.llm_chat.executor": "Run",
     "Python.llm_chess.executor": "Run",
     "Python.llm_etch_sketch.executor": "Run",
     "Python.llm_ttt.executor": "Run",
     "Python.load_locations.executor": "Run",
+    "Python.loader (1).executor": "Run",
+    "Python.loader (2).executor": "Run",
+    "Python.loader (3).executor": "Run",
+    "Python.loader.executor": "Run",
     "Python.main.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
@@ -58,6 +68,11 @@
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
     "vue.rearranger.settings.migration": "true"
+  },
+  "keyToStringList": {
+    "com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File": [
+      "TEXT"
+    ]
   }
 }]]></component>
   <component name="RecentsManager">
@@ -75,8 +90,8 @@
       <recent name="C:\Users\Home\Desktop\code\resume_demos" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.load_locations">
-    <configuration name="client" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+  <component name="RunManager" selected="Python.loader">
+    <configuration name="helpers" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -85,14 +100,12 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/weather" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="DEBUG_JUST_MY_CODE" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="C:\Users\Home\Desktop\code\resume_demos\HyperCoreSDK\client.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/helpers.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -101,7 +114,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="llm_chat" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="loader (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -110,14 +123,12 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/examples" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/weather" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="DEBUG_JUST_MY_CODE" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/examples/llm_chat.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/loader.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -126,7 +137,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="llm_ttt" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="loader (2)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -135,14 +146,12 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/examples" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/news" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="DEBUG_JUST_MY_CODE" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/examples/llm_ttt.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/news/loader.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -151,7 +160,30 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="load_locations" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="loader (3)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/sports" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/sports/loader.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="loader" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -164,35 +196,8 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="DEBUG_JUST_MY_CODE" value="false" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/geo/load_locations.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="resume_demos" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="DEBUG_JUST_MY_CODE" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/geo/loader.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -203,18 +208,18 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.load_locations" />
-        <item itemvalue="Python.main" />
-        <item itemvalue="Python.client" />
-        <item itemvalue="Python.llm_chat" />
-        <item itemvalue="Python.llm_ttt" />
+        <item itemvalue="Python.loader" />
+        <item itemvalue="Python.loader (3)" />
+        <item itemvalue="Python.loader (2)" />
+        <item itemvalue="Python.loader (1)" />
+        <item itemvalue="Python.helpers" />
       </list>
     </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-b63d5a1f7c97-b61e75351b1f-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-261.22158.340" />
+        <option value="bundled-python-sdk-2653e85de345-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.31033.139" />
       </set>
     </attachedChunks>
   </component>

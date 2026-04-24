@@ -59,6 +59,7 @@ def location_from_row(parts: list[str]) -> Location | None:
             country_code=country_code,
             country_flag_emoji=country_code_to_flag(country_code),
             timezone=parts[17].strip(),
+            population=int(parts[14]),
             elevation=_parse_int(parts[15]) or _parse_int(parts[16]),
         )
     except (ValueError, IndexError):

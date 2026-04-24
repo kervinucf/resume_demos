@@ -1,54 +1,13 @@
 # HyperCoreSDK/python/client.py
 """
 Python client for the HyperCore relay.
-
-Three construction modes:
-
-    c = HyperClient.attach("http://127.0.0.1:8765")
-    c = HyperClient.spawn(data_dir="./data")
-    c = HyperClient.peer(["http://127.0.0.1:8765", "http://teammate.local:8765"])
-
-The three verbs + subscription + bulk:
-
-    c.read(path)                            -> state doc or None
-    c.read_with_embeds(path, embeds=[...])  -> doc with _links rels resolved
-    c.write(path, data)
-    c.delete(path)
-    c.watch(path, callback_or_iter)         -> delivers DeltaEvent objects
-    with c.bulk(root="things") as b: ...
-    c.batch(root="...", ops=[...])
-
-About watch()
--------------
-Unlike the old implementation, watch() does not deliver snapshots — it
-delivers changes. The relay streams a cursor frame then delta frames
-{op, path, data, commit_seq, updated_at}. The client flattens those into
-a sequence of DeltaEvent objects. There is no client-side cache; each
-change is delivered once, in order, and the server guarantees that.
-
-If you want the initial state, ask for it explicitly:
-
-    initial = c.read(path)              # bounded: just this node + children
-    for delta in c.watch(path):         # changes from now onward
-        ...
-
-Or use hydrate_watch() which does both atomically (initial snapshot at
-cursor C, then deltas strictly after C):
-
-    for event in c.hydrate_watch(path):
-        if event.kind == "initial":    # one per subscription, has .snapshot
-            ...
-        else:                          # .op in ('put','del'), .path, .data, .commit_seq
-            ...
 """
 from __future__ import annotations
 
 import atexit
-import concurrent.futures
 import json
 import os
 import queue
-import shutil
 import socket
 import subprocess
 import sys
@@ -57,7 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
@@ -92,28 +51,8 @@ class HyperHttpError(HyperError):
         self.status = status
 
 
-# ---------------------------------------------------------------------------
-# Delta event — what watch() delivers
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class DeltaEvent:
-    """
-    One delivered change.
-
-    kind: "initial"  — the one-time snapshot from hydrate_watch()
-          "put"      — a write; `data` is the new payload (may be None for
-                       ancestor-only writes)
-          "del"      — a deletion; `data` is None
-          "cursor"   — informational; the subscription has advanced but has
-                       no change for this path (rare; filtered out by default)
-
-    path:        dotted path of the changed node
-    data:        payload at the path (for put) or None
-    commit_seq:  monotonic sequence number — use to dedupe across resyncs
-    updated_at:  ms since epoch
-    snapshot:    only set when kind == "initial"; full state doc at cursor
-    """
     kind: str
     path: str
     data: Any = None
@@ -121,10 +60,6 @@ class DeltaEvent:
     updated_at: int = 0
     snapshot: Optional[dict] = None
 
-
-# ---------------------------------------------------------------------------
-# HTTP
-# ---------------------------------------------------------------------------
 
 def _http(
     url: str,
@@ -183,10 +118,6 @@ def _sse_url(base: str, path: str, *, scope: str) -> str:
         f"?stream=true&scope={urllib.parse.quote(scope)}"
     )
 
-
-# ---------------------------------------------------------------------------
-# SSE → DeltaEvent stream
-# ---------------------------------------------------------------------------
 
 class _SSEStream:
     def __init__(
@@ -264,725 +195,395 @@ class _SSEStream:
             self._on_frame(parsed)
 
 
-class WatchHandle:
-    def __init__(self, stream: _SSEStream) -> None:
-        self._stream = stream
-
-    def stop(self) -> None:
-        self._stream.stop()
-
-    def __enter__(self) -> "WatchHandle":
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.stop()
-
-
-class WatchIterator:
-    """Iterator that blocks on new DeltaEvent objects until stop() is called."""
-    def __init__(self, factory: Callable[[Callable[[dict], None]], _SSEStream]) -> None:
-        self._q: "queue.Queue[Any]" = queue.Queue()
-        self._sentinel = object()
-
-        def handle_frame(frame: dict) -> None:
-            for ev in _frames_to_events(frame, include_initial=False):
-                self._q.put(ev)
-
-        self._stream = factory(handle_frame)
-        self._stream.start()
-
-    def __iter__(self) -> Iterator[DeltaEvent]:
-        return self
-
-    def __next__(self) -> DeltaEvent:
-        item = self._q.get()
-        if item is self._sentinel:
-            raise StopIteration
-        return item
-
-    def stop(self) -> None:
-        self._stream.stop()
-        self._q.put(self._sentinel)
-
-    def __enter__(self) -> "WatchIterator":
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self.stop()
-
-
-def _frames_to_events(frame: dict, *, include_initial: bool) -> list[DeltaEvent]:
-    """Translate a relay SSE frame into DeltaEvent objects."""
-    state = frame.get("_state") if isinstance(frame, dict) else None
-    if not isinstance(state, dict):
-        return []
-    kind = state.get("kind")
-
-    if kind == "cursor":
+class ChildrenResult(dict):
+    def items(self) -> list[dict[str, Any]]:  # type: ignore[override]
+        embedded = self.get("_embedded")
+        if isinstance(embedded, dict):
+            return [v for v in embedded.values() if isinstance(v, dict)]
+        rows = self.get("rows")
+        if isinstance(rows, list):
+            return [v for v in rows if isinstance(v, dict)]
         return []
 
-    if kind == "delta":
-        out: list[DeltaEvent] = []
-        for c in frame.get("changes") or []:
-            if not isinstance(c, dict):
-                continue
-            out.append(DeltaEvent(
-                kind=str(c.get("op") or "put"),
-                path=str(c.get("path") or ""),
-                data=c.get("data"),
-                commit_seq=int(c.get("commit_seq") or 0),
-                updated_at=int(c.get("updated_at") or 0),
-            ))
-        return out
 
-    return []
+@dataclass
+class BulkWriter:
+    client: "HyperClient"
+    root: str
+    ops: list[dict[str, Any]] = field(default_factory=list)
 
-
-# ---------------------------------------------------------------------------
-# Bulk
-# ---------------------------------------------------------------------------
-
-class BulkBatcher:
-    def __init__(
-        self,
-        client: "HyperClient",
-        *,
-        root: Optional[str] = None,
-        flush_every: int = 5000,
-        flush_bytes: int = 8_000_000,
-    ) -> None:
-        self._c = client
-        self._root = root
-        self._flush_every = max(1, int(flush_every))
-        self._flush_bytes = max(1, int(flush_bytes))
-        self._ops: list[dict] = []
-        self._bytes = 0
-        self.total_flushed = 0
-
-    @property
-    def pending(self) -> int:
-        return len(self._ops)
-
-    def put(self, path: str, data: dict) -> None:
-        self._append({"path": dot(path), "data": data})
+    def write(self, path: str, data: dict[str, Any]) -> None:
+        self.ops.append({"path": dot(path), "data": data})
 
     def delete(self, path: str) -> None:
-        self._append({"path": dot(path), "delete": True})
+        self.ops.append({"path": dot(path), "delete": True})
 
-    def extend(self, ops) -> None:
-        for op in ops:
-            if op and op.get("path"):
-                self._append(dict(op))
+    def flush(self) -> dict[str, Any]:
+        if not self.ops:
+            return {"ok": True, "count": 0}
+        ops = self.ops
+        self.ops = []
+        return self.client.batch(root=self.root, ops=ops)
 
-    def flush(self) -> int:
-        if not self._ops:
-            return 0
-        ops, self._ops, self._bytes = self._ops, [], 0
-        root = self._root or ops[0]["path"].split(".", 1)[0]
-        result = self._c.batch(root=root, ops=ops)
-        count = int(result.get("count") or len(ops))
-        self.total_flushed += count
-        return count
-
-    def __enter__(self) -> "BulkBatcher":
+    def __enter__(self) -> "BulkWriter":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         if exc_type is None:
             self.flush()
 
-    def _append(self, op: dict) -> None:
-        size = len(json.dumps(op, ensure_ascii=False, separators=(",", ":")))
-        if self._ops and (
-            len(self._ops) >= self._flush_every
-            or self._bytes + size > self._flush_bytes
-        ):
-            self.flush()
-        self._ops.append(op)
-        self._bytes += size
-
-
-# ---------------------------------------------------------------------------
-# Relay subprocess
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RelayProcess:
-    process: subprocess.Popen
-    data_dir: str
-    port: int
-    url: str
-
-
-def _is_executable(path: str | None) -> bool:
-    return bool(path) and Path(path).is_file() and os.access(path, os.X_OK)
-
-
-def _find_node() -> str:
-    candidates: list[Optional[str]] = [
-        os.environ.get("HYPER_NODE_PATH"),
-        os.environ.get("NODE_BINARY"),
-        shutil.which("node"),
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
-    ]
-
-    for candidate in candidates:
-        if _is_executable(candidate):
-            return str(Path(candidate).resolve())
-
-    raise RuntimeError(
-        "Node.js not found. Install Node.js, add `node` to PATH, "
-        "or set HYPER_NODE_PATH."
-    )
-
-
-def _find_npm() -> str:
-    candidates: list[Optional[str]] = [
-        os.environ.get("HYPER_NPM_PATH"),
-        shutil.which("npm"),
-        "/opt/homebrew/bin/npm",
-        "/usr/local/bin/npm",
-        "/usr/bin/npm",
-        "/opt/homebrew/lib/node_modules/npm/bin/npm-cli.js",
-        "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-    ]
-
-    for candidate in candidates:
-        if not candidate:
-            continue
-        p = Path(candidate)
-        if p.is_file():
-            return str(p.resolve())
-
-    raise RuntimeError(
-        "npm not found. Install Node.js/npm, add `npm` to PATH, "
-        "or set HYPER_NPM_PATH."
-    )
-
-
-def _npm_command(*args: str) -> list[str]:
-    npm = _find_npm()
-    npm_path = Path(npm)
-
-    if npm_path.suffix == ".js":
-        return [_find_node(), str(npm_path), *args]
-
-    return [str(npm_path), *args]
-
-
-def _sdk_root() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _relay_dir() -> Path:
-    return _sdk_root() / "src"
-
-
-def _package_json_path() -> Path:
-    return _relay_dir() / "package.json"
-
-
-def _package_lock_path() -> Path:
-    return _relay_dir() / "package-lock.json"
-
-
-def _node_modules_path() -> Path:
-    return _relay_dir() / "node_modules"
-
-
-def _required_module_markers() -> list[Path]:
-    node_modules = _node_modules_path()
-    return [
-        node_modules / "better-sqlite3",
-    ]
-
-
-def _should_skip_npm_install() -> bool:
-    raw = os.environ.get("HYPER_SKIP_NPM_INSTALL", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
-
-
-def _node_dependencies_ready() -> bool:
-    package_json = _package_json_path()
-    if not package_json.exists():
-        return True
-
-    node_modules = _node_modules_path()
-    if not node_modules.exists():
-        return False
-
-    markers = _required_module_markers()
-    if not markers:
-        return True
-
-    return all(marker.exists() for marker in markers)
-
-
-def _ensure_node_dependencies_installed() -> None:
-    if _should_skip_npm_install():
-        return
-
-    package_json = _package_json_path()
-    if not package_json.exists():
-        return
-
-    if _node_dependencies_ready():
-        return
-
-    relay_dir = _relay_dir()
-    install_cmd = _npm_command("ci") if _package_lock_path().exists() else _npm_command("install")
-
-    env = os.environ.copy()
-    node_bin = str(Path(_find_node()).resolve().parent)
-    existing_path = env.get("PATH", "")
-    env["PATH"] = f"{node_bin}{os.pathsep}{existing_path}" if existing_path else node_bin
-
-    try:
-        proc = subprocess.run(
-            install_cmd,
-            cwd=str(relay_dir),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise RuntimeError(
-            f"Failed to execute npm in {relay_dir}: {exc}"
-        ) from exc
-
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "Failed to install relay Node.js dependencies.\n"
-            f"Directory: {relay_dir}\n"
-            f"Command: {' '.join(install_cmd)}\n\n"
-            f"{proc.stdout}"
-        )
-
-    if not _node_dependencies_ready():
-        raise RuntimeError(
-            "Relay dependency install finished, but required modules are still missing "
-            f"in {relay_dir / 'node_modules'}."
-        )
-
-
-def _find_relay_script() -> str:
-    candidates: list[Path] = []
-
-    env = os.getenv("HYPER_RELAY_SCRIPT")
-    if env:
-        candidates.append(Path(env))
-
-    candidates.append(_relay_dir() / "relay.js")
-
-    here = Path(__file__).resolve().parent
-    candidates.extend([
-        here / "relay.js",
-        here.parent / "relay.js",
-        here.parent.parent / "relay.js",
-    ])
-
-    home = os.getenv("HYPER_HOME")
-    if home:
-        home_path = Path(home)
-        candidates.extend([
-            home_path / "relay.js",
-            home_path / "src" / "relay.js",
-        ])
-
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate.resolve())
-
-    raise RuntimeError(
-        "relay.js not found. Set HYPER_RELAY_SCRIPT or place relay.js in the relay package."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Client
-# ---------------------------------------------------------------------------
 
 class HyperClient:
-    """Construct via .attach / .spawn / .peer. Three intents, no magic fallbacks."""
-
     def __init__(
         self,
-        url: str,
+        url: str = DEFAULT_URL,
         *,
-        root: str = "default",
-        owned_relay: Optional[RelayProcess] = None,
+        root: str = "",
+        process: subprocess.Popen | None = None,
+        data_dir: str | None = None,
+        peers: list[str] | None = None,
     ) -> None:
         self.url = url.rstrip("/")
-        self.root = root
-        self._owned = owned_relay
-        self._watches: list[_SSEStream] = []
-        self._closed = False
-        if owned_relay:
+        self.root = dot(root)
+        self._owned_process = process
+        self._owned_data_dir = data_dir
+        self._peers = peers or [self.url]
+        self._streams: list[_SSEStream] = []
+        if process is not None:
             atexit.register(self.close)
 
     @classmethod
-    def attach(cls, url: str = DEFAULT_URL, *, root: str = "default") -> "HyperClient":
-        if not cls._health_ok(url):
-            host, port = _parse_url(url)
-            raise RuntimeError(
-                f"No relay responding at {url} ({host}:{port}). "
-                f"Use .spawn(data_dir=...) to start one or .peer([...]) to try a list."
-            )
+    def attach(cls, url: str = DEFAULT_URL, *, root: str = "") -> "HyperClient":
         return cls(url, root=root)
+
+    @classmethod
+    def peer(cls, urls: list[str], *, root: str = "") -> "HyperClient":
+        if not urls:
+            raise ValueError("peer() requires at least one url")
+        return cls(urls[0], root=root, peers=urls)
 
     @classmethod
     def spawn(
         cls,
-        data_dir: str = DEFAULT_DATA_DIR,
+        data_dir: str | None = None,
         *,
+        root: str = "",
         port: int = DEFAULT_PORT,
-        workers: int = 1,
-        env: Optional[dict] = None,
-        wait: bool = True,
-        root: str = "default",
-        ensure_node_deps: bool = True,
+        bind: str = "127.0.0.1",
+        relay_script: str | None = None,
+        workers: int | None = None,
+        ensure_node_deps: bool = False,
+        env: dict[str, str] | None = None,
     ) -> "HyperClient":
-        if _port_open("127.0.0.1", port):
-            raise RuntimeError(
-                f"Port {port} is already in use. "
-                f"Use .attach('http://127.0.0.1:{port}') if that's your relay."
-            )
+        url = f"http://127.0.0.1:{port}"
+        host, parsed_port = _parse_url(url)
+        if _port_open(host, parsed_port):
+            return cls.attach(url, root=root)
 
-        data_dir = str(Path(data_dir).expanduser().resolve())
-        Path(data_dir).mkdir(parents=True, exist_ok=True)
+        script = relay_script or os.environ.get("HYPER_RELAY_SCRIPT") or "relay.js"
+        data_dir = data_dir or DEFAULT_DATA_DIR
 
-        if ensure_node_deps:
-            _ensure_node_dependencies_installed()
+        merged_env = os.environ.copy()
+        merged_env.update(env or {})
+        merged_env["PORT"] = str(port)
+        merged_env["HYPER_BIND_HOST"] = bind
+        merged_env["HYPER_DATA_DIR"] = data_dir
+        if workers is not None:
+            merged_env["HYPER_WORKERS"] = str(workers)
 
-        proc_env = os.environ.copy()
-        proc_env["PORT"] = str(port)
-        proc_env["HYPER_BIND_HOST"] = proc_env.get("HYPER_BIND_HOST", "127.0.0.1")
-        proc_env["HYPER_DATA_DIR"] = data_dir
-        proc_env["HYPER_WORKERS"] = str(workers)
-        if env:
-            proc_env.update({k: str(v) for k, v in env.items()})
-
-        proc = subprocess.Popen(
-            [_find_node(), _find_relay_script()],
+        process = subprocess.Popen(
+            ["node", script],
+            env=merged_env,
             stdout=sys.stdout,
             stderr=sys.stderr,
-            env=proc_env,
-            start_new_session=True,
-            cwd=str(_relay_dir()),
         )
 
-        url = f"http://127.0.0.1:{port}"
-        owned = RelayProcess(process=proc, data_dir=data_dir, port=port, url=url)
+        deadline = time.time() + RELAY_START_TIMEOUT_S
+        while time.time() < deadline:
+            try:
+                health = _http(f"{url}/health", timeout=HEALTH_TIMEOUT_S)
+                if health and health.get("ok"):
+                    return cls(url, root=root, process=process, data_dir=data_dir)
+            except Exception:
+                pass
+            time.sleep(0.1)
 
-        if wait:
-            cls._wait_for_health(url, proc, timeout=RELAY_START_TIMEOUT_S)
-
-        return cls(url, root=root, owned_relay=owned)
-
-    @classmethod
-    def peer(cls, urls: list[str], *, root: str = "default") -> "HyperClient":
-        if not urls:
-            raise ValueError("peer() requires at least one URL")
-        for url in urls:
-            if cls._health_ok(url):
-                return cls(url.rstrip("/"), root=root)
-        raise RuntimeError(
-            f"No relay responded among {len(urls)} peer(s): {', '.join(urls)}."
-        )
+        try:
+            process.terminate()
+        except Exception:
+            pass
+        raise TimeoutError(f"relay did not start at {url}")
 
     @staticmethod
-    def _health_ok(url: str) -> bool:
+    def _health_ok(url: str = DEFAULT_URL) -> bool:
         try:
-            r = _http(f"{url.rstrip('/')}/health", timeout=HEALTH_TIMEOUT_S)
-            return bool(r and isinstance(r, dict) and r.get("ok"))
+            health = _http(f"{url.rstrip('/')}/health", timeout=HEALTH_TIMEOUT_S)
+            return bool(health and health.get("ok"))
         except Exception:
             return False
 
-    @staticmethod
-    def _wait_for_health(url: str, proc: subprocess.Popen, timeout: float) -> None:
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if proc.poll() is not None:
-                raise RuntimeError(f"Relay exited early with code {proc.returncode}")
-            if HyperClient._health_ok(url):
-                return
-            time.sleep(0.2)
-        raise RuntimeError(f"Timed out waiting for relay at {url}")
+    def owns_relay(self) -> bool:
+        return self._owned_process is not None
+
+    @property
+    def _owned(self):
+        class Owned:
+            def __init__(self, process):
+                self.process = process
+        return Owned(self._owned_process)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-
-        for w in self._watches:
+        for stream in list(self._streams):
             try:
-                w.stop()
+                stream.stop()
             except Exception:
                 pass
-        self._watches.clear()
+        self._streams.clear()
 
-        if self._owned and self._owned.process.poll() is None:
+        if self._owned_process and self._owned_process.poll() is None:
             try:
-                self._owned.process.terminate()
-                self._owned.process.wait(timeout=5)
+                self._owned_process.terminate()
+                self._owned_process.wait(timeout=3)
             except Exception:
                 try:
-                    self._owned.process.kill()
+                    self._owned_process.kill()
                 except Exception:
                     pass
+        self._owned_process = None
 
-    def __enter__(self) -> "HyperClient":
-        return self
+    def _url(self, path: str = "") -> str:
+        if not path:
+            return self.url
+        return _path_url(self.url, path)
 
-    def __exit__(self, *exc) -> None:
-        self.close()
+    def _request(
+        self,
+        method: str,
+        path_or_url: str,
+        *,
+        data: dict | None = None,
+        timeout: float = DEFAULT_HTTP_TIMEOUT_S,
+    ) -> Any:
+        if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+            url = path_or_url
+        elif path_or_url.startswith("/"):
+            url = f"{self.url}{path_or_url}"
+        else:
+            url = self._url(path_or_url)
+        return _http(url, method=method, data=data, timeout=timeout)
 
-    def owns_relay(self) -> bool:
-        return self._owned is not None
-
-    def health(self) -> dict:
-        return _http(f"{self.url}/health") or {}
+    def health(self) -> dict[str, Any]:
+        return self._request("GET", "/health")
 
     def roots(self) -> list[str]:
-        doc = _http(self.url) or {}
-        data = doc.get("data") if isinstance(doc, dict) else None
-        if isinstance(data, dict) and isinstance(data.get("roots"), list):
-            return list(data["roots"])
-        return []
+        doc = self._request("GET", "/")
+        links = doc.get("_links", {}) if isinstance(doc, dict) else {}
+        return sorted(k for k in links if k not in {"self", "stream", "changes_since", "parent"})
 
-    def read(self, path: str = "", **params) -> Any:
-        url = _path_url(self.url, path) if path else self.url
-        if params:
-            qs = urllib.parse.urlencode(
-                {k: v for k, v in params.items() if v is not None and v != ""},
-                doseq=True,
-            )
-            url = f"{url}?{qs}" if qs else url
-        try:
-            return _http(url)
-        except HyperNotFound:
-            return None
+    def read(self, path: str) -> dict | None:
+        return self._request("GET", dot(path))
 
-    def read_with_embeds(
-        self,
-        path: str,
-        embeds: list[str],
-        *,
-        parallel: int = 8,
-    ) -> Any:
+    def read_with_embeds(self, path: str, embeds: list[str] | None = None) -> dict | None:
         doc = self.read(path)
-        if not isinstance(doc, dict) or not embeds:
+        if not doc or not embeds:
             return doc
-
-        links = doc.get("_links") or {}
-        to_fetch = [(rel, links[rel]) for rel in embeds if rel in links]
-        if not to_fetch:
-            return doc
-
-        def fetch(rel_href: tuple[str, str]) -> tuple[str, Any]:
-            rel, href = rel_href
+        out = dict(doc)
+        resolved = {}
+        links = doc.get("_links", {}) if isinstance(doc, dict) else {}
+        for rel in embeds:
+            href = links.get(rel)
+            if not href:
+                continue
             try:
-                return rel, _http(href)
+                resolved[rel] = self._request("GET", href)
             except Exception:
-                return rel, None
-
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, min(parallel, len(to_fetch)))
-        ) as ex:
-            resolved = list(ex.map(fetch, to_fetch))
-
-        embedded = dict(doc.get("_embedded") or {})
-        for rel, sub in resolved:
-            if sub is not None:
-                embedded[rel] = sub
-        doc["_embedded"] = embedded
-        return doc
-
-    def write(self, path: str, data: Any) -> dict:
-        url = _path_url(self.url, path)
-        payload = data if isinstance(data, dict) else {"data": data}
-        return _http(url, "PUT", data=payload) or {}
-
-    def delete(self, path: str) -> dict:
-        return _http(_path_url(self.url, path), "DELETE") or {}
+                resolved[rel] = None
+        out["_resolved"] = resolved
+        return out
 
     def children(
-        self, path: str, *, page: int = 1, per_page: int = 200, order: str = "key_asc"
-    ) -> dict:
-        url = f"{_path_url(self.url, path)}/api/children"
-        qs = urllib.parse.urlencode({"page": page, "per_page": per_page, "order": order})
-        return _http(f"{url}?{qs}") or {}
+        self,
+        path: str,
+        *,
+        page: int = 1,
+        per_page: int = 100,
+        order: str = "key_asc",
+    ) -> ChildrenResult:
+        q = urllib.parse.urlencode({
+            "page": int(page),
+            "per_page": int(per_page),
+            "order": order,
+        })
+        doc = self._request("GET", f"/{urllib.parse.quote(dot(path), safe='.')}/api/children?{q}")
+        return ChildrenResult(doc or {})
 
-    def changes_since(
-        self, path: str, cursor: int, *, limit: int = 1024
-    ) -> dict:
-        """
-        HTTP resync. Returns a page of deltas strictly after `cursor`.
-        Follow `_links.next` until no changes remain to catch up fully.
-        """
-        url = f"{_path_url(self.url, path)}/api/changes-since"
-        qs = urllib.parse.urlencode({"cursor": cursor, "limit": limit})
-        return _http(f"{url}?{qs}") or {"changes": [], "_state": {"next_cursor": cursor}}
+    def write(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
+        return self._request("PUT", dot(path), data=data)
 
-    def bulk(
+    def delete(self, path: str) -> dict[str, Any]:
+        return self._request("DELETE", dot(path))
+
+    def batch(self, *, root: str | None = None, ops: list[dict[str, Any]]) -> dict[str, Any]:
+        endpoint = f"/{dot(root)}/api/batch" if root else "/api/batch"
+        return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+
+    def bulk(self, *, root: str) -> BulkWriter:
+        return BulkWriter(self, root=dot(root))
+
+    def query_entities(
         self,
         *,
-        root: Optional[str] = None,
-        flush_every: int = 5000,
-        flush_bytes: int = 8_000_000,
-    ) -> BulkBatcher:
-        return BulkBatcher(
-            self, root=root or self.root,
-            flush_every=flush_every, flush_bytes=flush_bytes,
-        )
+        entity_type: str | None = None,
+        facets: dict[str, str | bool | int | float] | None = None,
+        q: str | list[str] | None = None,
+        has_ref: str | list[str] | None = None,
+        refs: dict[str, str] | None = None,
+        cells: dict[str, str] | None = None,
+        number_gte: dict[str, float] | None = None,
+        number_lte: dict[str, float] | None = None,
+        time_gte: dict[str, int] | None = None,
+        time_lte: dict[str, int] | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        params: list[tuple[str, str]] = []
 
-    def batch(self, *, root: str, ops: list) -> dict:
-        url = f"{self.url}/{urllib.parse.quote(root, safe='.')}/api/batch"
-        return _http(url, "POST", data={"ops": list(ops)}) or {}
+        if entity_type:
+            params.append(("type", entity_type))
+
+        params.append(("limit", str(int(limit))))
+
+        for name, value in (facets or {}).items():
+            if value is True:
+                encoded_value = "true"
+            elif value is False:
+                encoded_value = "false"
+            else:
+                encoded_value = str(value)
+            params.append(("facet", f"{name}:{encoded_value}"))
+
+        if isinstance(q, str):
+            params.append(("q", q))
+        elif q:
+            for item in q:
+                params.append(("q", str(item)))
+
+        if isinstance(has_ref, str):
+            params.append(("has_ref", has_ref))
+        elif has_ref:
+            for item in has_ref:
+                params.append(("has_ref", str(item)))
+
+        for name, value in (refs or {}).items():
+            params.append(("ref", f"{name}:{value}"))
+
+        for name, value in (cells or {}).items():
+            params.append(("cell", f"{name}:{value}"))
+
+        for name, value in (number_gte or {}).items():
+            params.append(("number_gte", f"{name}:{float(value)}"))
+
+        for name, value in (number_lte or {}).items():
+            params.append(("number_lte", f"{name}:{float(value)}"))
+
+        for name, value in (time_gte or {}).items():
+            params.append(("time_gte", f"{name}:{int(value)}"))
+
+        for name, value in (time_lte or {}).items():
+            params.append(("time_lte", f"{name}:{int(value)}"))
+
+        suffix = urllib.parse.urlencode(params)
+        return self._request("GET", f"/api/query/entities?{suffix}")
 
     def watch(
         self,
         path: str,
-        callback: Optional[Callable[[DeltaEvent], None]] = None,
+        callback: Callable[[DeltaEvent], None] | None = None,
         *,
         scope: str = "subtree",
-        on_error: Optional[Callable[[Exception], None]] = None,
-    ):
-        """
-        Subscribe to live deltas at `path`.
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> Iterator[DeltaEvent] | None:
+        q: queue.Queue[DeltaEvent] = queue.Queue()
 
-            # callback form
-            handle = c.watch("geo.locations", lambda ev: print(ev.op, ev.path))
-            ...
-            handle.stop()
+        def on_frame(frame: dict) -> None:
+            state = frame.get("_state", {}) if isinstance(frame, dict) else {}
+            if state.get("kind") != "delta":
+                return
+            for change in frame.get("changes", []) or []:
+                ev = DeltaEvent(
+                    kind=change.get("op") or "put",
+                    path=change.get("path") or "",
+                    data=change.get("data"),
+                    commit_seq=int(change.get("commit_seq") or 0),
+                    updated_at=int(change.get("updated_at") or 0),
+                )
+                if callback:
+                    callback(ev)
+                else:
+                    q.put(ev)
 
-            # iterator form
-            for ev in c.watch("geo.locations"):
-                print(ev.op, ev.path, ev.data)
+        stream = _SSEStream(_sse_url(self.url, path, scope=scope), on_frame, on_error=on_error)
+        self._streams.append(stream)
+        stream.start()
 
-        scope="subtree" (default) receives every change under `path`.
-        scope="exact" receives only changes to `path` itself.
+        if callback:
+            return None
 
-        Because the stream is delta-only, there is no cache and no dedup.
-        Each change is delivered once in commit_seq order.
-        """
-        url = _sse_url(self.url, path, scope=scope)
+        def iterator() -> Iterator[DeltaEvent]:
+            try:
+                while True:
+                    yield q.get()
+            finally:
+                stream.stop()
+                try:
+                    self._streams.remove(stream)
+                except ValueError:
+                    pass
 
-        if callback is not None:
-            def handle_frame(frame: dict) -> None:
-                for ev in _frames_to_events(frame, include_initial=False):
-                    try:
-                        callback(ev)
-                    except Exception as exc:
-                        if on_error:
-                            try:
-                                on_error(exc)
-                            except Exception:
-                                pass
-
-            stream = _SSEStream(url, handle_frame, on_error=on_error)
-            stream.start()
-            self._watches.append(stream)
-            return WatchHandle(stream)
-
-        it = WatchIterator(lambda on_msg: _SSEStream(url, on_msg, on_error=on_error))
-        self._watches.append(it._stream)
-        return it
+        return iterator()
 
     def hydrate_watch(
         self,
         path: str,
         *,
         scope: str = "subtree",
-        on_error: Optional[Callable[[Exception], None]] = None,
-    ):
-        """
-        Like watch(), but the first event is an `initial` DeltaEvent carrying
-        the state doc at the cursor. Subsequent events are the live deltas.
-        """
-        q: "queue.Queue[Any]" = queue.Queue()
-        sentinel = object()
-
-        initial_doc = self.read(path) or {}
-        initial_seq = int(
-            ((initial_doc.get("_state") or {}).get("commit_seq")) or 0
-        )
-
-        q.put(DeltaEvent(
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> Iterator[DeltaEvent]:
+        snapshot = self.read(path)
+        initial_seq = int(((snapshot or {}).get("_state") or {}).get("commit_seq") or 0)
+        yield DeltaEvent(
             kind="initial",
             path=dot(path),
-            data=initial_doc.get("data") if isinstance(initial_doc, dict) else None,
+            data=snapshot.get("data") if isinstance(snapshot, dict) else None,
             commit_seq=initial_seq,
-            updated_at=0,
-            snapshot=initial_doc if isinstance(initial_doc, dict) else None,
-        ))
-
-        def handle_frame(frame: dict) -> None:
-            for ev in _frames_to_events(frame, include_initial=False):
-                if ev.commit_seq and ev.commit_seq <= initial_seq:
-                    continue
-                q.put(ev)
-
-        stream = _SSEStream(
-            _sse_url(self.url, path, scope=scope),
-            handle_frame,
-            on_error=on_error,
+            snapshot=snapshot if isinstance(snapshot, dict) else None,
         )
-        stream.start()
-        self._watches.append(stream)
-
-        class _HydrateIter:
-            def __iter__(self) -> Iterator[DeltaEvent]:
-                return self
-
-            def __next__(self) -> DeltaEvent:
-                item = q.get()
-                if item is sentinel:
-                    raise StopIteration
-                return item
-
-            def stop(self) -> None:
-                stream.stop()
-                q.put(sentinel)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_):
-                self.stop()
-
-        return _HydrateIter()
+        stream = self.watch(path, scope=scope, on_error=on_error)
+        assert stream is not None
+        for ev in stream:
+            if ev.commit_seq and ev.commit_seq <= initial_seq:
+                continue
+            yield ev
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def _print_json(value) -> None:
-    print(json.dumps(value, indent=2, ensure_ascii=False))
+def _print_json(value: Any) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False))
 
 
-def _main(argv: Optional[list[str]] = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     import argparse
     import signal
 
-    p = argparse.ArgumentParser(prog="python -m client")
+    argv = argv or sys.argv[1:]
+
+    p = argparse.ArgumentParser(prog="client.py")
     p.add_argument("--url", default=os.getenv("HYPER_URL", DEFAULT_URL))
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("spawn", help="start a relay (blocks)")
+    sp = sub.add_parser("spawn")
     sp.add_argument("data_dir", nargs="?", default=None)
     sp.add_argument("--port", type=int, default=DEFAULT_PORT)
     sp.add_argument("--workers", type=int, default=int(os.getenv("HYPER_WORKERS", "1")))
-    sp.add_argument(
-        "--skip-node-deps",
-        action="store_true",
-        help="skip automatic npm install/npm ci before starting the relay",
-    )
+    sp.add_argument("--relay-script", default=None)
 
     sub.add_parser("status")
     sub.add_parser("roots")
@@ -993,11 +594,11 @@ def _main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("children")
     sp.add_argument("path")
     sp.add_argument("--page", type=int, default=1)
-    sp.add_argument("--per-page", type=int, default=200, dest="per_page")
+    sp.add_argument("--per-page", type=int, default=100)
 
     sp = sub.add_parser("watch")
     sp.add_argument("path")
-    sp.add_argument("--scope", choices=["subtree", "exact"], default="subtree")
+    sp.add_argument("--scope", choices=["exact", "subtree"], default="subtree")
 
     sp = sub.add_parser("write")
     sp.add_argument("path")
@@ -1006,31 +607,39 @@ def _main(argv: Optional[list[str]] = None) -> int:
     sp = sub.add_parser("delete")
     sp.add_argument("path")
 
+    sp = sub.add_parser("query-entities")
+    sp.add_argument("--type", default=None)
+    sp.add_argument("--facet", action="append", default=[])
+    sp.add_argument("--q", action="append", default=[])
+    sp.add_argument("--has-ref", action="append", default=[])
+    sp.add_argument("--ref", action="append", default=[])
+    sp.add_argument("--cell", action="append", default=[])
+    sp.add_argument("--number-gte", action="append", default=[])
+    sp.add_argument("--number-lte", action="append", default=[])
+    sp.add_argument("--time-gte", action="append", default=[])
+    sp.add_argument("--time-lte", action="append", default=[])
+    sp.add_argument("--limit", type=int, default=100)
+
     args = p.parse_args(argv)
 
     if args.cmd == "spawn":
-        data_dir = (
-            str(Path(args.data_dir).expanduser().resolve())
-            if args.data_dir else DEFAULT_DATA_DIR
-        )
-        print(f"hyper: spawning relay on port {args.port} (data: {data_dir})")
+        data_dir = str(Path(args.data_dir or DEFAULT_DATA_DIR).expanduser().resolve())
         c = HyperClient.spawn(
             data_dir,
             port=args.port,
             workers=args.workers,
-            ensure_node_deps=not args.skip_node_deps,
+            relay_script=args.relay_script,
         )
         print(f"hyper: healthy at {c.url}")
 
         def shutdown(*_):
-            print("\nhyper: shutting down")
             c.close()
             sys.exit(0)
 
         signal.signal(signal.SIGINT, shutdown)
         signal.signal(signal.SIGTERM, shutdown)
-        if c._owned:
-            c._owned.process.wait()
+        if c._owned_process:
+            c._owned_process.wait()
         return 0
 
     if args.cmd == "status":
@@ -1064,10 +673,11 @@ def _main(argv: Optional[list[str]] = None) -> int:
 
     if args.cmd == "watch":
         c = HyperClient.attach(args.url)
-        print(f"watching {args.path} (scope={args.scope})")
         count = 0
         try:
-            for ev in c.watch(args.path, scope=args.scope):
+            stream = c.watch(args.path, scope=args.scope)
+            assert stream is not None
+            for ev in stream:
                 count += 1
                 print(f"[{count}] seq={ev.commit_seq} {ev.kind} {ev.path}")
         except KeyboardInterrupt:
@@ -1089,6 +699,47 @@ def _main(argv: Optional[list[str]] = None) -> int:
         result = HyperClient.attach(args.url).delete(args.path)
         _print_json(result)
         return 0 if result.get("ok") else 1
+
+    if args.cmd == "query-entities":
+        def pairs(items: list[str]) -> dict[str, str]:
+            out: dict[str, str] = {}
+            for raw in items:
+                if ":" in raw:
+                    k, v = raw.split(":", 1)
+                    out[k] = v
+            return out
+
+        def int_pairs(items: list[str]) -> dict[str, int]:
+            out: dict[str, int] = {}
+            for raw in items:
+                if ":" in raw:
+                    k, v = raw.split(":", 1)
+                    out[k] = int(v)
+            return out
+
+        def float_pairs(items: list[str]) -> dict[str, float]:
+            out: dict[str, float] = {}
+            for raw in items:
+                if ":" in raw:
+                    k, v = raw.split(":", 1)
+                    out[k] = float(v)
+            return out
+
+        result = HyperClient.attach(args.url).query_entities(
+            entity_type=args.type,
+            facets=pairs(args.facet),
+            q=args.q or None,
+            has_ref=args.has_ref or None,
+            refs=pairs(args.ref),
+            cells=pairs(args.cell),
+            number_gte=float_pairs(args.number_gte),
+            number_lte=float_pairs(args.number_lte),
+            time_gte=int_pairs(args.time_gte),
+            time_lte=int_pairs(args.time_lte),
+            limit=args.limit,
+        )
+        _print_json(result)
+        return 0
 
     return 2
 
