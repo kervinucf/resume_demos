@@ -21,15 +21,7 @@ Compact hypermedia shape:
     sports.leaderboards.<league>.<yyyy-mm-dd>.<category>.refs.<rank>-<athlete>
 
 This is intentionally a score-bug / hypermedia loader, not a full ESPN mirror.
-
-The game advertises transitions to teams, venue, leaderboards, latest, streams,
-and changes. Teams advertise transitions to their games and athletes.
-
-ESPN summary shapes observed:
-- summary["leaders"] is team-scoped and contains athlete leader rows.
-- future NBA/NHL games have leaders but usually no boxscore athletes.
-- MLB live/final games expose athletes under boxscore.players[].statistics[].athletes[].
-"""  # :contentReference[oaicite:0]{index=0}
+"""
 
 from __future__ import annotations
 
@@ -39,18 +31,16 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.utils.server import create_hyper_server
-from app.utils.storage import create_default_storage_directory
+from HyperCoreSDK.python.client import HyperClient
+from HyperCoreSDK.python.helpers.server import create_hyper_server
+from HyperCoreSDK.python.helpers.storage import create_default_storage_directory
+from HyperCoreSDK.python.helpers.indexes import ScopeSpec, ValueIndexSpec
 from app.utils.dtos.SportsEvent import SportsGame
 from app.utils.clients.espn import EspnApiClient, EspnApiError
 from app.lib.sports.helpers import games_from_scoreboard, now_utc
-from HyperCoreSDK.python.client import HyperClient
-from HyperCoreSDK.python.indexes import (
-    ScopeSpec,
-    ValueIndexSpec,
-    upsert_with_indexes,
-)
 
+
+SPORTS_ROOT = "sports"
 
 DEFAULT_LEAGUES = ["nba", "nfl", "nhl", "mlb", "eng.1"]
 DEFAULT_LOOKBACK_HOURS = 18
@@ -234,15 +224,15 @@ def athlete_key_from_values(name: Any, athlete_id: Any) -> str:
 
 
 def team_path(game: SportsGame, team: Any) -> str:
-    return f"sports.teams.{game.league}.{team_key(team)}"
+    return f"{SPORTS_ROOT}.teams.{game.league}.{team_key(team)}"
 
 
 def team_path_from_key(league: str, tkey: str) -> str:
-    return f"sports.teams.{league}.{tkey}"
+    return f"{SPORTS_ROOT}.teams.{league}.{tkey}"
 
 
 def athlete_path_from_key(league: str, akey: str) -> str:
-    return f"sports.athletes.{league}.{akey}"
+    return f"{SPORTS_ROOT}.athletes.{league}.{akey}"
 
 
 def venue_key(game: SportsGame) -> str:
@@ -258,15 +248,15 @@ def venue_key(game: SportsGame) -> str:
 
 
 def venue_path(game: SportsGame) -> str:
-    return f"sports.venues.{venue_key(game)}"
+    return f"{SPORTS_ROOT}.venues.{venue_key(game)}"
 
 
 def game_path(game: SportsGame) -> str:
-    return f"sports.games.{game.record_key().replace('/', '.')}"
+    return f"{SPORTS_ROOT}.games.{game.record_key().replace('/', '.')}"
 
 
 def leaderboards_day_path(game: SportsGame) -> str:
-    return f"sports.leaderboards.{game.league}.{day(game.start_time)}"
+    return f"{SPORTS_ROOT}.leaderboards.{game.league}.{day(game.start_time)}"
 
 
 def leaderboard_path(game: SportsGame, category: str) -> str:
@@ -592,11 +582,11 @@ def game_links(game: SportsGame) -> dict[str, str]:
         "away_team": team_path(game, game.away),
         "venue": venue_path(game),
         "leaderboards": leaderboards_day_path(game),
-        "latest": f"sports.latest.{game.latest_key()}",
-        "league_games": f"sports.index.by.league.{slug(game.league)}",
-        "day_games": f"sports.index.scoped.league.{slug(game.league)}.start_day.{slug(day(game.start_time))}",
-        "status_games": f"sports.index.scoped.league.{slug(game.league)}.status.{slug(game.status)}",
-        "mode_games": f"sports.index.scoped.league.{slug(game.league)}.score_bug_mode",
+        "latest": f"{SPORTS_ROOT}.latest.{game.latest_key()}",
+        "league_games": f"{SPORTS_ROOT}.index.by.league.{slug(game.league)}",
+        "day_games": f"{SPORTS_ROOT}.index.scoped.league.{slug(game.league)}.start_day.{slug(day(game.start_time))}",
+        "status_games": f"{SPORTS_ROOT}.index.scoped.league.{slug(game.league)}.status.{slug(game.status)}",
+        "mode_games": f"{SPORTS_ROOT}.index.scoped.league.{slug(game.league)}.score_bug_mode",
         "stream": stream_link(path),
         "changes_since": changes_link(path),
     }
@@ -702,7 +692,7 @@ def payload_for_game(game: SportsGame, *, mode: str, summary: dict[str, Any] | N
 # Hypermedia writers
 # ---------------------------------------------------------------------------
 
-def write_game_refs(hc: HyperClient, game: SportsGame) -> None:
+def write_game_refs(client: HyperClient, game: SportsGame) -> None:
     path = game_path(game)
 
     refs = {
@@ -710,25 +700,24 @@ def write_game_refs(hc: HyperClient, game: SportsGame) -> None:
         "away_team": team_path(game, game.away),
         "venue": venue_path(game),
         "leaderboards": leaderboards_day_path(game),
-        "latest": f"sports.latest.{game.latest_key()}",
+        "latest": f"{SPORTS_ROOT}.latest.{game.latest_key()}",
     }
 
     for rel, target in refs.items():
-        hc.write(
-            f"{path}.refs.{rel}",
-            {
+        client.write_backref(
+            source=path,
+            rel=rel,
+            target=target,
+            data={
                 "kind": "ref",
                 "rel": rel,
                 "target": target,
-                "_links": {
-                    "target": target,
-                },
             },
         )
 
 
 def write_team(
-    hc: HyperClient,
+    client: HyperClient,
     game: SportsGame,
     team: Any,
     game_abs: str,
@@ -736,9 +725,10 @@ def write_team(
     path = team_path(game, team)
     tkey = team_key(team)
 
-    hc.write(
-        path,
-        {
+    client.write_pointer(
+        path=path,
+        target=game_abs,
+        data={
             "model": "sports-team",
             "team_key": tkey,
             "team_id": team.team_id,
@@ -748,38 +738,38 @@ def write_team(
             "league": game.league,
             "sport": game.sport,
             "latest_game": game_abs,
-            "_links": {
+        },
+        links={
+            "latest_game": game_abs,
+            "games": f"{path}.refs.games",
+            "athletes": f"{path}.refs.athletes",
+            "league": f"{SPORTS_ROOT}.index.by.league.{slug(game.league)}",
+            "stream": stream_link(path),
+            "changes_since": changes_link(path),
+        },
+        query={
+            "entity_id": path,
+            "entity_type": "sports_team",
+            "canonical_path": path,
+            "display": team.display_name,
+            "text": f"{team.display_name} {team.abbreviation} {game.league} {game.sport}",
+            "facets": {
+                "league": game.league,
+                "sport": game.sport,
+                "team_key": tkey,
+                "team_id": team.team_id,
+                "abbreviation": team.abbreviation,
+            },
+            "refs": {
                 "latest_game": game_abs,
-                "games": f"{path}.refs.games",
-                "athletes": f"{path}.refs.athletes",
-                "league": f"sports.index.by.league.{slug(game.league)}",
-                "stream": stream_link(path),
-                "changes_since": changes_link(path),
             },
-            "query": {
-                "entity_id": path,
-                "entity_type": "sports_team",
-                "canonical_path": path,
-                "display": team.display_name,
-                "text": f"{team.display_name} {team.abbreviation} {game.league} {game.sport}",
-                "facets": {
-                    "league": game.league,
-                    "sport": game.sport,
-                    "team_key": tkey,
-                    "team_id": team.team_id,
-                    "abbreviation": team.abbreviation,
-                },
-                "refs": {
-                    "latest_game": game_abs,
-                },
-                "tokens": [
-                    team.display_name,
-                    team.abbreviation,
-                    game.league,
-                    game.sport,
-                    tkey,
-                ],
-            },
+            "tokens": [
+                team.display_name,
+                team.abbreviation,
+                game.league,
+                game.sport,
+                tkey,
+            ],
         },
     )
 
@@ -787,7 +777,7 @@ def write_team(
 
 
 def write_venue(
-    hc: HyperClient,
+    client: HyperClient,
     game: SportsGame,
     game_abs: str,
     fetched_at: str,
@@ -795,50 +785,51 @@ def write_venue(
     path = venue_path(game)
     vkey = venue_key(game)
 
-    hc.write(
-        path,
-        {
+    client.write_pointer(
+        path=path,
+        target=game_abs,
+        data={
             "model": "sports-venue",
             "venue_key": vkey,
             "name": game.venue_name,
             "city": game.venue_city,
             "country": game.venue_country,
             "latest_game": game_abs,
-            "_links": {
+        },
+        links={
+            "latest_game": game_abs,
+            "games": f"{path}.refs.games",
+            "stream": stream_link(path),
+            "changes_since": changes_link(path),
+        },
+        query={
+            "entity_id": path,
+            "entity_type": "sports_venue",
+            "canonical_path": path,
+            "display": game.venue_name or vkey,
+            "text": " ".join(
+                str(x)
+                for x in [game.venue_name, game.venue_city, game.venue_country]
+                if x
+            ),
+            "facets": {
+                "venue_key": vkey,
+                "city": game.venue_city,
+                "country": game.venue_country,
+            },
+            "times": {
+                "fetched_at": ms(fetched_at),
+                "activity_latest_at": ms(fetched_at),
+            },
+            "refs": {
                 "latest_game": game_abs,
-                "games": f"{path}.refs.games",
-                "stream": stream_link(path),
-                "changes_since": changes_link(path),
             },
-            "query": {
-                "entity_id": path,
-                "entity_type": "sports_venue",
-                "canonical_path": path,
-                "display": game.venue_name or vkey,
-                "text": " ".join(
-                    str(x)
-                    for x in [game.venue_name, game.venue_city, game.venue_country]
-                    if x
-                ),
-                "facets": {
-                    "venue_key": vkey,
-                    "city": game.venue_city,
-                    "country": game.venue_country,
-                },
-                "times": {
-                    "fetched_at": ms(fetched_at),
-                    "activity_latest_at": ms(fetched_at),
-                },
-                "refs": {
-                    "latest_game": game_abs,
-                },
-                "tokens": [
-                    game.venue_name,
-                    game.venue_city,
-                    game.venue_country,
-                    vkey,
-                ],
-            },
+            "tokens": [
+                game.venue_name,
+                game.venue_city,
+                game.venue_country,
+                vkey,
+            ],
         },
     )
 
@@ -846,7 +837,7 @@ def write_venue(
 
 
 def write_athletes(
-    hc: HyperClient,
+    client: HyperClient,
     *,
     game: SportsGame,
     game_abs: str,
@@ -872,70 +863,72 @@ def write_athletes(
         )
         tpath = team_path_from_key(game.league, tkey)
 
-        hc.write(
-            path,
-            {
+        client.write_pointer(
+            path=path,
+            target=game_abs,
+            data={
                 "model": "sports-athlete",
                 **athlete,
                 "athlete_key": akey,
                 "league": game.league,
                 "sport": game.sport,
                 "latest_game": game_abs,
-                "_links": {
+            },
+            links={
+                "latest_game": game_abs,
+                "team": tpath,
+                "games": f"{path}.refs.games",
+                "stream": stream_link(path),
+                "changes_since": changes_link(path),
+            },
+            query={
+                "entity_id": path,
+                "entity_type": "sports_athlete",
+                "canonical_path": path,
+                "display": athlete.get("display_name") or athlete_id,
+                "text": " ".join(str(x) for x in [
+                    athlete.get("display_name"),
+                    athlete.get("short_name"),
+                    athlete.get("team_abbreviation"),
+                    athlete.get("position"),
+                    game.league,
+                    game.sport,
+                ] if x),
+                "facets": {
+                    "league": game.league,
+                    "sport": game.sport,
+                    "athlete_key": akey,
+                    "athlete_id": athlete_id,
+                    "team_key": tkey,
+                    "team_id": athlete.get("team_id") or "",
+                    "position": athlete.get("position") or "",
+                },
+                "refs": {
                     "latest_game": game_abs,
                     "team": tpath,
-                    "games": f"{path}.refs.games",
-                    "stream": stream_link(path),
-                    "changes_since": changes_link(path),
                 },
-                "query": {
-                    "entity_id": path,
-                    "entity_type": "sports_athlete",
-                    "canonical_path": path,
-                    "display": athlete.get("display_name") or athlete_id,
-                    "text": " ".join(str(x) for x in [
-                        athlete.get("display_name"),
-                        athlete.get("short_name"),
-                        athlete.get("team_abbreviation"),
-                        athlete.get("position"),
-                        game.league,
-                        game.sport,
-                    ] if x),
-                    "facets": {
-                        "league": game.league,
-                        "sport": game.sport,
-                        "athlete_key": akey,
-                        "athlete_id": athlete_id,
-                        "team_key": tkey,
-                        "team_id": athlete.get("team_id") or "",
-                        "position": athlete.get("position") or "",
-                    },
-                    "refs": {
-                        "latest_game": game_abs,
-                        "team": tpath,
-                    },
-                    "tokens": [
-                        athlete.get("display_name"),
-                        athlete.get("short_name"),
-                        athlete.get("team_abbreviation"),
-                        athlete.get("position"),
-                        game.league,
-                        game.sport,
-                        akey,
-                    ],
-                },
+                "tokens": [
+                    athlete.get("display_name"),
+                    athlete.get("short_name"),
+                    athlete.get("team_abbreviation"),
+                    athlete.get("position"),
+                    game.league,
+                    game.sport,
+                    akey,
+                ],
             },
         )
 
-        hc.write(
-            f"{path}.refs.games.{game.matchup_key()}",
-            {
+        client.write_backref(
+            source=path,
+            rel=f"games.{game.matchup_key()}",
+            target=game_abs,
+            data={
                 "kind": "sports-game",
                 "target": game_abs,
-                "_links": {
-                    "target": game_abs,
-                    "team": tpath,
-                },
+            },
+            links={
+                "team": tpath,
             },
         )
 
@@ -945,7 +938,7 @@ def write_athletes(
 
 
 def write_team_athlete_refs(
-    hc: HyperClient,
+    client: HyperClient,
     *,
     game: SportsGame,
     game_abs: str,
@@ -968,9 +961,11 @@ def write_team_athlete_refs(
         )
         tpath = team_path_from_key(game.league, tkey)
 
-        hc.write(
-            f"{tpath}.refs.athletes.{akey}",
-            {
+        client.write_backref(
+            source=tpath,
+            rel=f"athletes.{akey}",
+            target=target,
+            data={
                 "kind": "athlete-ref",
                 "target": target,
                 "athlete_id": athlete_id,
@@ -983,18 +978,17 @@ def write_team_athlete_refs(
                 "team_key": tkey,
                 "team_abbreviation": athlete.get("team_abbreviation"),
                 "latest_game": game_abs,
-                "_links": {
-                    "target": target,
-                    "athlete": target,
-                    "team": tpath,
-                    "latest_game": game_abs,
-                },
+            },
+            links={
+                "athlete": target,
+                "team": tpath,
+                "latest_game": game_abs,
             },
         )
 
 
 def write_leaderboards(
-    hc: HyperClient,
+    client: HyperClient,
     *,
     game: SportsGame,
     leaders: list[dict[str, Any]],
@@ -1009,7 +1003,7 @@ def write_leaderboards(
     for category, rows in grouped.items():
         start_day = day(game.start_time)
         rel = f"leaderboards/{game.league}/{start_day}/{category}"
-        path = f"sports.{rel.replace('/', '.')}"
+        path = f"{SPORTS_ROOT}.{rel.replace('/', '.')}"
         category_display = str(rows[0].get("category_display") or category)
 
         clean_rows = []
@@ -1055,9 +1049,8 @@ def write_leaderboards(
             "leaders": clean_rows,
         }
 
-        upsert_with_indexes(
-            hc,
-            root="sports",
+        client.write_record_with_indexes(
+            root=SPORTS_ROOT,
             record_path=rel,
             record_data=data,
             index_specs=LEADERBOARD_INDEXES,
@@ -1065,62 +1058,63 @@ def write_leaderboards(
             ref_payload=data,
         )
 
-        hc.write(
-            path,
-            {
-                **data,
-                "_links": {
+        client.write_pointer(
+            path=path,
+            target=game_path(game),
+            data=data,
+            links={
+                "updated_from_game": game_path(game),
+                "day": leaderboards_day_path(game),
+                "league": f"{SPORTS_ROOT}.leaderboards.{game.league}",
+                "stream": stream_link(path),
+                "changes_since": changes_link(path),
+            },
+            query={
+                "entity_id": path,
+                "entity_type": "sports_leaderboard",
+                "canonical_path": path,
+                "display": f"{game.league} {start_day} {category_display}",
+                "text": " ".join(str(x) for x in [
+                    game.league,
+                    game.sport,
+                    start_day,
+                    category,
+                    category_display,
+                    *[r.get("display_name") for r in clean_rows],
+                ] if x),
+                "facets": {
+                    "league": game.league,
+                    "sport": game.sport,
+                    "date": start_day,
+                    "category": category,
+                },
+                "numbers": {
+                    "leader_count": len(clean_rows),
+                },
+                "times": {
+                    "fetched_at": ms(fetched_at),
+                    "activity_latest_at": ms(fetched_at),
+                },
+                "refs": {
                     "updated_from_game": game_path(game),
-                    "day": leaderboards_day_path(game),
-                    "league": f"sports.leaderboards.{game.league}",
-                    "stream": stream_link(path),
-                    "changes_since": changes_link(path),
                 },
-                "query": {
-                    "entity_id": path,
-                    "entity_type": "sports_leaderboard",
-                    "canonical_path": path,
-                    "display": f"{game.league} {start_day} {category_display}",
-                    "text": " ".join(str(x) for x in [
-                        game.league,
-                        game.sport,
-                        start_day,
-                        category,
-                        category_display,
-                        *[r.get("display_name") for r in clean_rows],
-                    ] if x),
-                    "facets": {
-                        "league": game.league,
-                        "sport": game.sport,
-                        "date": start_day,
-                        "category": category,
-                    },
-                    "numbers": {
-                        "leader_count": len(clean_rows),
-                    },
-                    "times": {
-                        "fetched_at": ms(fetched_at),
-                        "activity_latest_at": ms(fetched_at),
-                    },
-                    "refs": {
-                        "updated_from_game": game_path(game),
-                    },
-                    "tokens": [
-                        game.league,
-                        game.sport,
-                        start_day,
-                        category,
-                        category_display,
-                        *[r.get("display_name") for r in clean_rows],
-                    ],
-                },
+                "tokens": [
+                    game.league,
+                    game.sport,
+                    start_day,
+                    category,
+                    category_display,
+                    *[r.get("display_name") for r in clean_rows],
+                ],
             },
         )
 
         for idx, row in enumerate(clean_rows, start=1):
-            hc.write(
-                f"{path}.refs.{idx:02d}-{row['athlete_key']}",
-                {
+            client.write_backref(
+                source=path,
+                rel=f"{idx:02d}-{row['athlete_key']}",
+                target=row.get("athlete_path"),
+                data={
                     "kind": "leaderboard-entry",
                     "rank": row.get("rank"),
                     "display_name": row.get("display_name"),
@@ -1128,11 +1122,11 @@ def write_leaderboards(
                     "athlete_path": row.get("athlete_path"),
                     "team_path": row.get("team_path"),
                     "game_path": row.get("game_path"),
-                    "_links": {
-                        "athlete": row.get("athlete_path"),
-                        "team": row.get("team_path"),
-                        "game": row.get("game_path"),
-                    },
+                },
+                links={
+                    "athlete": row.get("athlete_path"),
+                    "team": row.get("team_path"),
+                    "game": row.get("game_path"),
                 },
             )
 
@@ -1140,7 +1134,7 @@ def write_leaderboards(
 
 
 def write_game(
-    hc: HyperClient,
+    client: HyperClient,
     game: SportsGame,
     *,
     fetched_at: str,
@@ -1151,9 +1145,8 @@ def write_game(
     rel = f"games/{game.record_key()}"
     data = payload_for_game(game, mode=mode, summary=summary)
 
-    upsert_with_indexes(
-        hc,
-        root="sports",
+    client.write_record_with_indexes(
+        root=SPORTS_ROOT,
         record_path=rel,
         record_data=data,
         index_specs=GAME_INDEXES,
@@ -1172,47 +1165,48 @@ def write_game(
         },
     )
 
-    hc.write(
-        path,
-        {
-            **data,
-            "_links": game_links(game),
-            "query": query_for_game(game, path, fetched_at, mode=mode),
-        },
+    client.write_pointer(
+        path=path,
+        target=path,
+        data=data,
+        links=game_links(game),
+        query=query_for_game(game, path, fetched_at, mode=mode),
     )
 
-    write_game_refs(hc, game)
+    write_game_refs(client, game)
 
-    hc.write(
-        f"sports.latest.{game.latest_key()}",
-        {
+    client.write_pointer(
+        path=f"{SPORTS_ROOT}.latest.{game.latest_key()}",
+        target=path,
+        data={
             **game.latest_dict(path),
             "score_bug_mode": mode,
-            "_links": {
-                "target": path,
-                "home_team": team_path(game, game.home),
-                "away_team": team_path(game, game.away),
-                "venue": venue_path(game),
-                "leaderboards": leaderboards_day_path(game),
-            },
-            "query": query_for_game(
-                game,
-                f"sports.latest.{game.latest_key()}",
-                fetched_at,
-                mode=mode,
-            ),
         },
+        links={
+            "home_team": team_path(game, game.home),
+            "away_team": team_path(game, game.away),
+            "venue": venue_path(game),
+            "leaderboards": leaderboards_day_path(game),
+        },
+        query=query_for_game(
+            game,
+            f"{SPORTS_ROOT}.latest.{game.latest_key()}",
+            fetched_at,
+            mode=mode,
+        ),
     )
 
     matchup = game.matchup_key()
 
     for team in (game.home, game.away):
         role = "home" if team.is_home else "away"
-        tpath = write_team(hc, game, team, path)
+        tpath = write_team(client, game, team, path)
 
-        hc.write(
-            f"{tpath}.refs.games.{matchup}",
-            {
+        client.write_backref(
+            source=tpath,
+            rel=f"games.{matchup}",
+            target=path,
+            data={
                 "kind": "sports-game",
                 "target": path,
                 "role": role,
@@ -1220,37 +1214,37 @@ def write_game(
                 "status": game.status,
                 "status_detail": game.status_detail,
                 "start_time": game.start_time,
-                "_links": {
-                    "target": path,
-                    "opponent": team_path(game, game.away if team.is_home else game.home),
-                    "venue": venue_path(game),
-                },
+            },
+            links={
+                "opponent": team_path(game, game.away if team.is_home else game.home),
+                "venue": venue_path(game),
             },
         )
 
-    vpath = write_venue(hc, game, path, fetched_at)
+    vpath = write_venue(client, game, path, fetched_at)
 
-    hc.write(
-        f"{vpath}.refs.games.{matchup}",
-        {
+    client.write_backref(
+        source=vpath,
+        rel=f"games.{matchup}",
+        target=path,
+        data={
             "kind": "sports-game",
             "target": path,
             "matchup": f"{game.away.abbreviation} @ {game.home.abbreviation}",
             "status": game.status,
             "status_detail": game.status_detail,
             "start_time": game.start_time,
-            "_links": {
-                "target": path,
-                "home_team": team_path(game, game.home),
-                "away_team": team_path(game, game.away),
-            },
+        },
+        links={
+            "home_team": team_path(game, game.home),
+            "away_team": team_path(game, game.away),
         },
     )
 
     bits = summary_bits(summary)
 
     athlete_count = write_athletes(
-        hc,
+        client,
         game=game,
         game_abs=path,
         athletes=bits["athletes"],
@@ -1258,14 +1252,14 @@ def write_game(
     )
 
     write_team_athlete_refs(
-        hc,
+        client,
         game=game,
         game_abs=path,
         athletes=bits["athletes"],
     )
 
     leader_count = write_leaderboards(
-        hc,
+        client,
         game=game,
         leaders=bits["leaders"],
         fetched_at=fetched_at,
@@ -1278,7 +1272,7 @@ def write_game(
 
 
 def sync_league(
-    hc: HyperClient,
+    client: HyperClient,
     espn: EspnApiClient,
     *,
     league: str,
@@ -1350,7 +1344,7 @@ def sync_league(
 
         try:
             write_game(
-                hc,
+                client,
                 game,
                 fetched_at=fetched_at,
                 summary=summary,
@@ -1422,7 +1416,7 @@ def run(
 
 if __name__ == "__main__":
     client = create_hyper_server(
-        root="sports",
+        root=SPORTS_ROOT,
         data_path=create_default_storage_directory(),
     )
 

@@ -1,5 +1,5 @@
-from app.utils.server import create_hyper_server
-from app.utils.storage import create_default_storage_directory
+from HyperCoreSDK.python.helpers.server import create_hyper_server
+from HyperCoreSDK.python.helpers.storage import create_default_storage_directory
 
 hc = create_hyper_server(
     root="geo",

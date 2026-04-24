@@ -9,14 +9,16 @@ from pathlib import Path
 from HyperCoreSDK.python.client import HyperClient, DEFAULT_URL
 
 
-SOURCE_ROOT = os.getenv("HYPER_SOURCE_ROOT", "geo")
+SOURCE_ROOT = os.getenv("HYPER_SOURCE_ROOT", "")
 DERIVED_ROOT = os.getenv("HYPER_DERIVED_ROOT", "derived")
 URL = os.getenv("HYPER_URL", DEFAULT_URL)
 DATA_DIR = str(Path(os.getenv("HYPER_DATA_DIR", Path.cwd() / ".hyper-data")).expanduser().resolve())
+THIS_FILE_PATH = Path(__file__).resolve().parent
 
 def _define_relay_script() -> None:
-    project_folder = Path.cwd().parent.parent.parent
-    os.environ["HYPER_RELAY_SCRIPT"] = f"{project_folder}/HyperCoreSDK/src/relay.js"
+    os.environ["HYPER_RELAY_SCRIPT"] = str(
+        (THIS_FILE_PATH / "../../src/relay.js").resolve()
+    )
 
 
 def create_hyper_server(url=URL, root=SOURCE_ROOT, data_path=DATA_DIR) -> HyperClient:

@@ -1,77 +1,24 @@
-# HyperCoreSDK/python/load_locations.py
-"""
-Load GeoNames populated-places into the hypergraph.
-
-Reads allCountries.txt (tab-separated, from https://download.geonames.org/export/dump/),
-writes one Location node per populated place at `geo.locations.<slug>-<geoname_id>`,
-and maintains country_code and timezone indexes so downstream consumers
-(weather, news, map viewers) can navigate by region.
-
-After a run, the `geo` namespace looks like:
-
-    geo/
-      locations/
-        new-york-city-5128581       (your record)
-        paris-2988507
-        ...
-      index/
-        by/
-          country_code/
-            US/
-              5128581               (ref → geo.locations.new-york-city-5128581)
-              ...
-            FR/
-              2988507
-          timezone/
-            america-new-york/
-              5128581
-            europe-paris/
-              2988507
-      _meta/
-        memberships/
-          <sha1 of each record path>
-
-Every index entry carries projected fields (name, country flag, lat/lon, ...)
-so UIs can render listings without a second round-trip to hydrate the source
-record. Follow `_links.record` on any entry to reach the canonical node.
-
-Usage
------
-    # Auto-spawn a relay if one isn't already running
-    python load_locations.py ./cities5000.txt
-
-    # Use an existing relay
-    HYPER_URL=http://127.0.0.1:8765 python load_locations.py ./allCountries.txt
-
-    # Limit for development
-    python load_locations.py ./allCountries.txt --limit 50000
-"""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from app.utils.server import create_hyper_server
-from app.utils.storage import create_default_storage_directory
-from app.lib.geo.helpers import location_from_row, Location
+
 from HyperCoreSDK.python.client import HyperClient
-from HyperCoreSDK.python.indexes import (
+from HyperCoreSDK.python.helpers.server import create_hyper_server
+from HyperCoreSDK.python.helpers.storage import create_default_storage_directory
+from HyperCoreSDK.python.helpers.indexes import (
     ScopeSpec,
     ValueIndexSpec,
-    upsert_with_indexes,
+    plan_upsert,
 )
+from app.lib.geo.helpers import location_from_row
 
-# ---------------------------------------------------------------------------
-# Index specs
-#
-# Reads like sentences:
-#
-#   "Index by country_code, uppercase. Project name, flag, tz, lat, lon
-#    onto each entry's links."
-#
-#   "Index by timezone, slugified. Also nest under country_code so that
-#    `index/scoped/country_code/US/timezone/america-new-york/` contains only
-#    the US entries in that zone."
-# ---------------------------------------------------------------------------
+
+ROOT = "geo"
+USE_DIRECT = True
+BATCH_OPS = 9_000
+PROGRESS_EVERY = 50_000
+
 
 LOCATION_INDEXES: list[ValueIndexSpec] = [
     ValueIndexSpec(
@@ -114,64 +61,62 @@ LOCATION_INDEXES: list[ValueIndexSpec] = [
     ),
 ]
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
-def main(client_instance: HyperClient) -> int:
-    print(
-        client_instance.read(
-            "geo.locations"
+def make_writer():
+    if USE_DIRECT:
+        return HyperClient.direct_writer(
+            data_dir=create_default_storage_directory(),
+            root=ROOT,
+            reset=True,
+            bulk=True,
+            batch_ops=BATCH_OPS,
+            flush_every_rows=1_000_000,
+            write_outbox=False,
+            skip_memberships=True,
         )
+
+    client = create_hyper_server(
+        root=ROOT,
+        data_path=create_default_storage_directory(),
     )
 
-    try:
-        data_file_path = Path(__file__).parent / "allCountries.txt"
-        path = Path(data_file_path)
-        count = 0
+    return client.writer(batch_ops=BATCH_OPS)
 
-        with path.open("r", encoding="utf-8") as f:
+
+def ops_for_location(root: str, loc) -> list[dict]:
+    return plan_upsert(
+        root=root,
+        record_path=f"locations/{loc.record_key()}",
+        record_data=loc.to_dict(),
+        index_specs=LOCATION_INDEXES,
+        ref_key=str(loc.geoname_id),
+        ref_payload=loc.ref_payload(),
+        prior_paths=(),
+    )
+
+
+def main() -> int:
+    data_file_path = Path(__file__).parent / "allCountries.txt"
+
+    count = 0
+
+    with make_writer() as writer:
+        with data_file_path.open("r", encoding="utf-8") as f:
             for line in f:
                 loc = location_from_row(line.rstrip("\n").split("\t"))
                 if loc is None:
                     continue
 
-                upsert_with_indexes(
-                    client_instance,
-                    record_path=f"locations/{loc.record_key()}",
-                    record_data=loc.to_dict(),
-                    index_specs=LOCATION_INDEXES,
-                    ref_key=loc.geoname_id,
-                    ref_payload=loc.ref_payload(),
-                )
-
+                writer.write_ops(ops_for_location(writer.root, loc))
                 count += 1
-                if 5000 > 0 and count % 5000 == 0:
-                    print(f"  loaded {count:,}…")
 
-    finally:
-        # A spawned relay stays up after loading so you can poke at the data
-        # or start consumers. Ctrl-C to stop.
-        if client_instance.owns_relay():
-            print(f"relay still running at {client_instance.url} (Ctrl-C to stop)")
-            try:
-                client_instance._owned.process.wait()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                client_instance.close()
-        else:
-            client_instance.close()
+                if count % PROGRESS_EVERY == 0:
+                    print(f"  loaded {count:,}… ({writer.written:,} writes)")
+
+        print(f"done: loaded {count:,} locations ({writer.written:,} writes)")
 
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(
-        main(
-            client_instance=create_hyper_server(
-                root="geo",
-                data_path=create_default_storage_directory(),
-            )
-        )
-    )
+    sys.exit(main())

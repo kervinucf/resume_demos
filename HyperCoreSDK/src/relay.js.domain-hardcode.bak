@@ -760,46 +760,30 @@ function renderSearchResultsHtml(origin, u) {
 
   const result = qRunEntityQuery(queryParamsFromUrl(u));
   const items = result.items || [];
-
-  const resultHref = escapeHtml(queryUrlWithPath(u, '/search/results'));
   const rawJsonHref = escapeHtml(queryUrlWithPath(u, '/query/entities'));
   const apiHref = escapeHtml(queryUrlWithPath(u, '/api/query/entities'));
-
-  const urlBlock = `
-    <div class="row">
-      <span class="muted">Result URL:</span>
-      <a href="${resultHref}">
-        <code>${resultHref}</code>
-      </a>
-    </div>
-
-    <div class="search-actions">
-      <a class="pill" href="${resultHref}">Open result URL</a>
-      <a class="pill" href="${apiHref}">JSON</a>
-      <a class="pill" href="${rawJsonHref}">Raw JSON</a>
-    </div>
-  `;
 
   if (!items.length) {
     return `
       ${renderQueryState(u)}
-      ${urlBlock}
-
       <div class="search-result">
         <h3>No results</h3>
         <p class="muted">Try a broader text query, fewer facets, or a larger limit.</p>
+        <div class="search-actions">
+          <a class="pill" href="${apiHref}">JSON</a>
+          <a class="pill" href="${rawJsonHref}">Raw JSON</a>
+        </div>
       </div>
     `;
   }
 
   return `
     ${renderQueryState(u)}
-    ${urlBlock}
-
-    <div class="row muted">
-      Found ${escapeHtml(result.total ?? items.length)} result${items.length === 1 ? '' : 's'}.
+    <div class="row muted">Found ${escapeHtml(result.total ?? items.length)} result${items.length === 1 ? '' : 's'}.</div>
+    <div class="search-actions">
+      <a class="pill" href="${apiHref}">JSON</a>
+      <a class="pill" href="${rawJsonHref}">Raw JSON</a>
     </div>
-
     ${items.map(item => renderSearchResultCard(origin, item)).join('')}
   `;
 }
@@ -2000,6 +1984,25 @@ function summarizeNode(cls, node, children, parts) {
       return `Ref: ${d.rel || name}${target}.`;
     }
 
+    case 'athlete-ref': {
+      const d = (node && node.data) || {};
+      const label = d.display_name || d.athlete_key || name;
+      return `Athlete: ${label}.`;
+    }
+
+    case 'leaderboard-entry': {
+      const d = (node && node.data) || {};
+      const label = d.display_name || name;
+      const rank = d.rank ? `#${d.rank} ` : '';
+      const value = d.display_value ? ` — ${d.display_value}` : '';
+      return `Leaderboard entry: ${rank}${label}${value}.`;
+    }
+
+    case 'sports-game': {
+      const d = (node && node.data) || {};
+      return `Game: ${d.matchup || name}${d.status_detail ? ` (${d.status_detail})` : ''}.`;
+    }
+
     case 'index_bucket': {
       const indexName = parts.length >= 2 ? parts[parts.length - 2] : 'index';
       return `Index bucket: ${indexName} = ${name}. ${total} reference${total === 1 ? '' : 's'}.`;
@@ -2065,6 +2068,24 @@ function classifyEmbeddedChild(childRow, childParts) {
     };
   }
 
+  if (childRow.data && childRow.data.kind === 'sports-game') {
+    return {
+      kind: 'sports-game',
+      item_kind: 'ref',
+      display_as: 'detail',
+      primary_link: 'target'
+    };
+  }
+
+  if (childRow.data && childRow.data.kind === 'leaderboard-entry') {
+    return {
+      kind: 'leaderboard-entry',
+      item_kind: 'ref',
+      display_as: 'detail',
+      primary_link: 'athlete'
+    };
+  }
+
   if (childRow.data != null) {
     return {
       kind: 'record',
@@ -2099,6 +2120,25 @@ function summarizeEmbeddedChild(cls, childRow, childParts) {
       const d = childRow.data || {};
       const target = d.target ? ` → ${d.target}` : '';
       return `Ref: ${d.rel || name}${target}.`;
+    }
+
+    case 'athlete-ref': {
+      const d = childRow.data || {};
+      const label = d.display_name || d.athlete_key || name;
+      return `Athlete: ${label}.`;
+    }
+
+    case 'leaderboard-entry': {
+      const d = childRow.data || {};
+      const label = d.display_name || name;
+      const rank = d.rank ? `#${d.rank} ` : '';
+      const value = d.display_value ? ` — ${d.display_value}` : '';
+      return `Leaderboard entry: ${rank}${label}${value}.`;
+    }
+
+    case 'sports-game': {
+      const d = childRow.data || {};
+      return `Game: ${d.matchup || name}${d.status_detail ? ` (${d.status_detail})` : ''}.`;
     }
 
     case 'record': {

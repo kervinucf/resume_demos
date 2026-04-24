@@ -2,32 +2,9 @@
 """
 Pull RSS/Atom feeds into the hypergraph.
 
-This loader starts the relay with root="geo" so preloaded geo indexes and
-location records are visible, while canonical news records and news indexes
-are explicitly written under root="news".
-
-Selection/config is controlled by calling run(...), not CLI args.
-
-Example
--------
-    run(
-        client_instance=client,
-        feeds=[
-            FeedSpec(
-                region="world",
-                source="bbc",
-                url="https://feeds.bbci.co.uk/news/world/rss.xml",
-                match_country=None,
-            ),
-            FeedSpec(
-                region="us",
-                source="nyt",
-                url="https://rss.nytimes.com/services/xml/rss/nyt/US.xml",
-                match_country="US",
-            ),
-        ],
-        limit_per_feed=25,
-    )
+Canonical records and news indexes are written under root="news".
+The relay starts with root="geo" so preloaded geo indexes and location records
+are available for location matching.
 """
 
 from __future__ import annotations
@@ -38,8 +15,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.utils.server import create_hyper_server
-from app.utils.storage import create_default_storage_directory
+from HyperCoreSDK.python.client import HyperClient
+from HyperCoreSDK.python.helpers.server import create_hyper_server
+from HyperCoreSDK.python.helpers.storage import create_default_storage_directory
+from HyperCoreSDK.python.helpers.indexes import ScopeSpec, ValueIndexSpec
 from app.utils.clients.rss import RssApiClient
 from app.utils.dtos.NewsEvent import NewsArticle
 from app.lib.news.helpers import (
@@ -48,12 +27,10 @@ from app.lib.news.helpers import (
     now_utc,
     parse_feed_bytes,
 )
-from HyperCoreSDK.python.client import HyperClient
-from HyperCoreSDK.python.indexes import (
-    ScopeSpec,
-    ValueIndexSpec,
-    upsert_with_indexes,
-)
+
+
+GEO_ROOT = "geo"
+NEWS_ROOT = "news"
 
 
 @dataclass(frozen=True)
@@ -170,7 +147,7 @@ NEWS_INDEXES: list[ValueIndexSpec] = [
 ]
 
 
-def _parse_dt(value: str) -> datetime:
+def parse_dt(value: str) -> datetime:
     text = str(value or "").strip()
 
     if text.endswith("Z"):
@@ -187,127 +164,100 @@ def _parse_dt(value: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _dt_ms(value: str) -> int:
-    return int(_parse_dt(value).timestamp() * 1000)
+def dt_ms(value: str) -> int:
+    return int(parse_dt(value).timestamp() * 1000)
 
 
-def _published_day(value: str) -> str:
-    return _parse_dt(value).strftime("%Y-%m-%d")
+def published_day(value: str) -> str:
+    return parse_dt(value).strftime("%Y-%m-%d")
 
 
-def _article_text(article: NewsArticle) -> str:
+def article_text(article: NewsArticle) -> str:
     data = article.to_dict()
 
-    parts = [
-        data.get("title"),
-        data.get("summary"),
-        data.get("description"),
-        data.get("source"),
-        data.get("region"),
-        data.get("link"),
+    return " ".join(
+        str(part)
+        for part in [
+            data.get("title"),
+            data.get("summary"),
+            data.get("description"),
+            data.get("source"),
+            data.get("region"),
+            data.get("link"),
+        ]
+        if part
+    )
+
+
+def article_tokens(article: NewsArticle) -> list[str]:
+    data = article.to_dict()
+
+    return [
+        token
+        for token in [
+            str(data.get("title") or ""),
+            str(data.get("summary") or ""),
+            str(data.get("source") or ""),
+            str(data.get("region") or ""),
+            *[str(key) for key in article.location_keys],
+        ]
+        if token
     ]
 
-    return " ".join(str(p) for p in parts if p)
 
-
-def _article_tokens(article: NewsArticle) -> list[str]:
+def article_record_data(article: NewsArticle) -> dict[str, Any]:
     data = article.to_dict()
-
-    tokens: list[str] = [
-        str(data.get("title") or ""),
-        str(data.get("summary") or ""),
-        str(data.get("source") or ""),
-        str(data.get("region") or ""),
-    ]
-
-    for key in article.location_keys:
-        tokens.append(str(key))
-
-    return [t for t in tokens if t]
-
-
-def _article_record_data(article: NewsArticle) -> dict[str, Any]:
-    data = article.to_dict()
-    data["published_day"] = _published_day(article.published_at)
+    data["published_day"] = published_day(article.published_at)
     data["location_count"] = len(article.location_keys)
     data["has_locations"] = bool(article.location_keys)
     return data
 
 
-def _article_ref_payload(article: NewsArticle) -> dict[str, Any]:
+def article_ref_payload(article: NewsArticle) -> dict[str, Any]:
     payload = article.ref_payload()
-    payload["published_day"] = _published_day(article.published_at)
+    payload["published_day"] = published_day(article.published_at)
     payload["location_count"] = len(article.location_keys)
     payload["has_locations"] = bool(article.location_keys)
     return payload
 
 
-def _article_query(article: NewsArticle, item_abs: str, fetched_at: str) -> dict[str, Any]:
-    published_ms = _dt_ms(article.published_at)
-    fetched_ms = _dt_ms(fetched_at)
-
+def article_refs(article: NewsArticle, item_abs: str | None = None) -> dict[str, Any]:
     refs: dict[str, Any] = {}
 
+    if item_abs:
+        refs["target"] = item_abs
+
     if article.location_keys:
         refs["location"] = [
-            f"geo.locations.{key}"
+            f"{GEO_ROOT}.locations.{key}"
             for key in article.location_keys
         ]
 
-    return {
-        "entity_id": item_abs,
-        "entity_type": "news_article",
-        "canonical_path": item_abs,
-        "display": article.title,
-        "text": _article_text(article),
-        "facets": {
-            "source": article.source,
-            "region": article.region,
-            "published_day": _published_day(article.published_at),
-            "has_locations": bool(article.location_keys),
-        },
-        "numbers": {
-            "location_count": len(article.location_keys),
-        },
-        "times": {
-            "published_at": published_ms,
-            "fetched_at": fetched_ms,
-            "activity_latest_at": max(published_ms, fetched_ms),
-        },
-        "refs": refs,
-        "tokens": _article_tokens(article),
-    }
+    return refs
 
 
-def _latest_query(
+def article_query(
     article: NewsArticle,
-    latest_abs: str,
-    item_abs: str,
+    *,
+    entity_id: str,
+    entity_type: str,
+    display: str,
     fetched_at: str,
+    target: str | None = None,
 ) -> dict[str, Any]:
-    published_ms = _dt_ms(article.published_at)
-    fetched_ms = _dt_ms(fetched_at)
-
-    refs: dict[str, Any] = {
-        "target": item_abs,
-    }
-
-    if article.location_keys:
-        refs["location"] = [
-            f"geo.locations.{key}"
-            for key in article.location_keys
-        ]
+    published_ms = dt_ms(article.published_at)
+    fetched_ms = dt_ms(fetched_at)
 
     return {
-        "entity_id": latest_abs,
-        "entity_type": "news_latest",
-        "canonical_path": latest_abs,
-        "display": f"{article.region}/{article.source}",
-        "text": _article_text(article),
+        "entity_id": entity_id,
+        "entity_type": entity_type,
+        "canonical_path": entity_id,
+        "display": display,
+        "text": article_text(article),
         "facets": {
             "source": article.source,
             "region": article.region,
-            "published_day": _published_day(article.published_at),
+            "published_day": published_day(article.published_at),
             "has_locations": bool(article.location_keys),
         },
         "numbers": {
@@ -318,12 +268,12 @@ def _latest_query(
             "fetched_at": fetched_ms,
             "activity_latest_at": max(published_ms, fetched_ms),
         },
-        "refs": refs,
-        "tokens": _article_tokens(article),
+        "refs": article_refs(article, target),
+        "tokens": article_tokens(article),
     }
 
 
-def _location_news_ref_query(
+def location_news_ref_query(
     *,
     loc_path: str,
     article: NewsArticle,
@@ -331,19 +281,19 @@ def _location_news_ref_query(
     ref_path: str,
     fetched_at: str,
 ) -> dict[str, Any]:
-    published_ms = _dt_ms(article.published_at)
-    fetched_ms = _dt_ms(fetched_at)
+    published_ms = dt_ms(article.published_at)
+    fetched_ms = dt_ms(fetched_at)
 
     return {
         "entity_id": ref_path,
         "entity_type": "location_news_ref",
         "canonical_path": ref_path,
         "display": article.title,
-        "text": _article_text(article),
+        "text": article_text(article),
         "facets": {
             "source": article.source,
             "region": article.region,
-            "published_day": _published_day(article.published_at),
+            "published_day": published_day(article.published_at),
             "location_path": loc_path,
         },
         "times": {
@@ -355,115 +305,113 @@ def _location_news_ref_query(
             "location": loc_path,
             "news_article": item_abs,
         },
-        "tokens": _article_tokens(article),
+        "tokens": article_tokens(article),
     }
 
 
 def write_article(
-    hc: HyperClient,
+    client: HyperClient,
     article: NewsArticle,
     *,
     fetched_at: str,
 ) -> str:
     item_rel = f"items/{article.record_key()}"
-    item_abs = f"news.{item_rel.replace('/', '.')}"
-    latest_abs = f"news.latest.{article.latest_key().replace('/', '.')}"
+    item_abs = f"{NEWS_ROOT}.{item_rel.replace('/', '.')}"
+    latest_abs = f"{NEWS_ROOT}.latest.{article.latest_key().replace('/', '.')}"
+    article_data = article_record_data(article)
 
-    article_data = _article_record_data(article)
-
-    upsert_with_indexes(
-        hc,
-        root="news",
+    client.write_record_with_indexes(
+        root=NEWS_ROOT,
         record_path=item_rel,
         record_data=article_data,
         index_specs=NEWS_INDEXES,
         ref_key=article.article_id,
-        ref_payload=_article_ref_payload(article),
+        ref_payload=article_ref_payload(article),
     )
 
-    hc.write(
+    client.write(
         item_abs,
         {
             **article_data,
-            "query": _article_query(article, item_abs, fetched_at),
+            "query": article_query(
+                article,
+                entity_id=item_abs,
+                entity_type="news_article",
+                display=article.title,
+                fetched_at=fetched_at,
+            ),
         },
     )
 
-    latest_links: dict[str, str] = {
-        "target": item_abs,
-    }
+    latest_links: dict[str, str] = {}
 
     if len(article.location_keys) == 1:
-        latest_links["location"] = f"geo.locations.{article.location_keys[0]}"
+        latest_links["location"] = f"{GEO_ROOT}.locations.{article.location_keys[0]}"
 
-    latest_data = article.latest_dict(item_abs)
-
-    hc.write(
-        latest_abs,
-        {
-            **latest_data,
-            "_links": latest_links,
-            "query": _latest_query(article, latest_abs, item_abs, fetched_at),
-        },
+    client.write_pointer(
+        path=latest_abs,
+        target=item_abs,
+        data=article.latest_dict(item_abs),
+        links=latest_links,
+        query=article_query(
+            article,
+            entity_id=latest_abs,
+            entity_type="news_latest",
+            display=f"{article.region}/{article.source}",
+            fetched_at=fetched_at,
+            target=item_abs,
+        ),
     )
 
-    pub_dt = _parse_dt(article.published_at)
+    pub_dt = parse_dt(article.published_at)
     ts_tail = f"{pub_dt.year:04d}.{pub_dt.month:02d}.{pub_dt.day:02d}.{article.article_id}"
 
     for key in article.location_keys:
-        loc_path = f"geo.locations.{key}"
-        ref_path = f"{loc_path}.refs.news.{ts_tail}"
+        loc_path = f"{GEO_ROOT}.locations.{key}"
+        rel = f"news.{ts_tail}"
+        ref_path = f"{loc_path}.refs.{rel}"
 
-        hc.write(
-            ref_path,
-            {
+        client.write_backref(
+            source=loc_path,
+            rel=rel,
+            target=item_abs,
+            data={
                 "kind": "news-article",
                 "target": item_abs,
-                **_article_ref_payload(article),
-                "_links": {
-                    "target": item_abs,
-                },
-                "query": _location_news_ref_query(
-                    loc_path=loc_path,
-                    article=article,
-                    item_abs=item_abs,
-                    ref_path=ref_path,
-                    fetched_at=fetched_at,
-                ),
+                **article_ref_payload(article),
             },
+            query=location_news_ref_query(
+                loc_path=loc_path,
+                article=article,
+                item_abs=item_abs,
+                ref_path=ref_path,
+                fetched_at=fetched_at,
+            ),
         )
 
     return item_abs
 
 
 def sync_feed(
-    hc: HyperClient,
+    client: HyperClient,
     rss: RssApiClient,
+    feed: FeedSpec,
     *,
-    region: str,
-    source: str,
-    url: str,
-    match_country: str | None,
     limit: int | None = None,
 ) -> int:
-    print(f"feed: {region}/{source} — {url}")
+    print(f"feed: {feed.region}/{feed.source} — {feed.url}")
 
     try:
-        body = rss.fetch_bytes(url)
-    except Exception as exc:
-        print(f"  fetch failed: {type(exc).__name__}: {exc}")
-        return 0
-
-    try:
+        body = rss.fetch_bytes(feed.url)
         raw_items = parse_feed_bytes(body)
     except Exception as exc:
-        print(f"  parse failed: {type(exc).__name__}: {exc}")
+        print(f"  failed: {type(exc).__name__}: {exc}")
         return 0
 
-    matchers = build_location_matcher(hc, match_country) if match_country else []
+    matchers = build_location_matcher(client, feed.match_country) if feed.match_country else []
 
-    if match_country:
-        print(f"  matchers built for {match_country}: {len(matchers)} names")
+    if feed.match_country:
+        print(f"  matchers built for {feed.match_country}: {len(matchers)} names")
 
     fetched_at = now_utc().isoformat()
     written = 0
@@ -474,8 +422,8 @@ def sync_feed(
 
         article = article_from_raw(
             raw,
-            source=source,
-            region=region,
+            source=feed.source,
+            region=feed.region,
             matchers=matchers,
             fetched_at=fetched_at,
         )
@@ -484,11 +432,7 @@ def sync_feed(
             continue
 
         try:
-            item_abs = write_article(
-                hc,
-                article,
-                fetched_at=fetched_at,
-            )
+            item_abs = write_article(client, article, fetched_at=fetched_at)
             written += 1
 
             loc_hint = (
@@ -506,7 +450,7 @@ def sync_feed(
 
 
 def run(
-    client_instance: HyperClient,
+    client: HyperClient,
     *,
     feeds: list[FeedSpec] | None = None,
     limit_per_feed: int | None = None,
@@ -514,26 +458,21 @@ def run(
     keep_alive: bool = True,
 ) -> int:
     rss = RssApiClient()
-    selected_feeds = feeds or DEFAULT_FEEDS
-
     total = 0
 
     try:
-        for feed in selected_feeds:
+        for feed in feeds or DEFAULT_FEEDS:
             total += sync_feed(
-                client_instance,
+                client,
                 rss,
-                region=feed.region,
-                source=feed.source,
-                url=feed.url,
-                match_country=feed.match_country,
+                feed,
                 limit=limit_per_feed,
             )
 
         print(f"done — {total} article(s)")
 
         if keep_alive:
-            print(f"relay still running at {client_instance.url} (Ctrl-C to stop)")
+            print(f"relay still running at {client.url} (Ctrl-C to stop)")
             while True:
                 time.sleep(3600)
 
@@ -542,20 +481,20 @@ def run(
 
     finally:
         if close_client:
-            client_instance.close()
+            client.close()
 
     return 0
 
 
 if __name__ == "__main__":
     client = create_hyper_server(
-        root="geo",
+        root=GEO_ROOT,
         data_path=create_default_storage_directory(),
     )
 
     sys.exit(
         run(
-            client_instance=client,
+            client,
             feeds=[
                 FeedSpec(
                     region="world",

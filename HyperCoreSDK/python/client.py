@@ -262,6 +262,169 @@ class HyperClient:
             raise ValueError("peer() requires at least one url")
         return cls(urls[0], root=root, peers=urls)
 
+    def select_records(
+        self,
+        *,
+        root: str,
+        collection: str,
+        from_data,
+        by: dict | None = None,
+        where=None,
+        limit: int | None = None,
+        per_page: int = 200,
+    ):
+        from HyperCoreSDK.python.helpers.records import select_records
+
+        return select_records(
+            self,
+            root=root,
+            collection=collection,
+            from_data=from_data,
+            by=by,
+            where=where,
+            limit=limit,
+            per_page=per_page,
+        )
+
+    def write_record_with_indexes(
+        self,
+        *,
+        root: str,
+        record_path: str,
+        record_data: dict,
+        index_specs: list | None = None,
+        ref_key: str | None = None,
+        ref_payload: dict | None = None,
+        links: dict | None = None,
+        actions: dict | None = None,
+    ) -> int:
+        from HyperCoreSDK.python.helpers.records import write_record_with_indexes
+
+        return write_record_with_indexes(
+            self,
+            root=root,
+            record_path=record_path,
+            record_data=record_data,
+            index_specs=index_specs,
+            ref_key=ref_key,
+            ref_payload=ref_payload,
+            links=links,
+            actions=actions,
+        )
+
+    def write_pointer(
+        self,
+        *,
+        path: str,
+        target: str,
+        data: dict,
+        links: dict | None = None,
+        query: dict | None = None,
+    ):
+        from HyperCoreSDK.python.helpers.records import write_pointer
+
+        return write_pointer(
+            self,
+            path=path,
+            target=target,
+            data=data,
+            links=links,
+            query=query,
+        )
+
+    def write_backref(
+        self,
+        *,
+        source: str,
+        rel: str,
+        target: str,
+        data: dict,
+        links: dict | None = None,
+        query: dict | None = None,
+    ):
+        from HyperCoreSDK.python.helpers.records import write_backref
+
+        return write_backref(
+            self,
+            source=source,
+            rel=rel,
+            target=target,
+            data=data,
+            links=links,
+            query=query,
+        )
+
+    @classmethod
+    def direct(
+        cls,
+        *,
+        data_dir: str | None = None,
+        root: str = "",
+        reset: bool = False,
+        write_outbox: bool = False,
+        flush_every_rows: int = 1_000_000,
+    ):
+        """
+        Open a trusted local direct-SQLite writer for high-throughput bulk ingest.
+
+        The relay should be stopped while this is active if writing to the live
+        data directory. For online writes, use batch()/write() through the relay.
+        """
+        from HyperCoreSDK.python.helpers.direct import HyperDirect
+
+        return HyperDirect(
+            data_dir=data_dir or DEFAULT_DATA_DIR,
+            root=root,
+            reset=reset,
+            write_outbox=write_outbox,
+            flush_every_rows=flush_every_rows,
+        )
+
+    def writer(self, *, batch_ops: int = 9_000):
+        """
+        Create a buffered HTTP writer.
+
+        This keeps the relay as the single writer and is safe for online use.
+        """
+        from HyperCoreSDK.python.helpers.writer import HyperHttpWriter
+
+        return HyperHttpWriter(self, batch_ops=batch_ops)
+
+
+    @classmethod
+    def direct_writer(
+        cls,
+        *,
+        data_dir: str | None = None,
+        root: str = "",
+        reset: bool = False,
+        bulk: bool = False,
+        batch_ops: int = 9_000,
+        flush_every_rows: int = 1_000_000,
+        write_outbox: bool = False,
+        skip_memberships: bool = False,
+        drop_parent_lookup_index: bool = True,
+    ):
+        """
+        Create a buffered direct-SQLite writer.
+
+        This gives loaders the same shape as client.writer(), but writes
+        directly to the local SQLite DB.
+        """
+        from HyperCoreSDK.python.helpers.writer import HyperDirectWriter
+
+        return HyperDirectWriter(
+            data_dir=data_dir or DEFAULT_DATA_DIR,
+            root=root,
+            reset=reset,
+            bulk=bulk,
+            batch_ops=batch_ops,
+            flush_every_rows=flush_every_rows,
+            write_outbox=write_outbox,
+            skip_memberships=skip_memberships,
+            drop_parent_lookup_index=drop_parent_lookup_index,
+        )
+
     @classmethod
     def spawn(
         cls,
