@@ -4,19 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/app/lib/example.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/lib/geo/countryInfo.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/lib/social/loader.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/lib/weather/example.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/records.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/records.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/geo/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/geo/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/weather/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/app/requirements.txt" afterDir="false" />
-    </list>
+    <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
