@@ -5,21 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/direct.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/records.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/writer.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/app/lib/base.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/example.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/geo/countryInfo.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/social/loader.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/lib/weather/example.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/client.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/indexes.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/indexes.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/records.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/records.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/src/relay.js" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/geo/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/geo/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/news/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/lib/sports/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/sports/loader.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/lib/weather/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/loader.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/dtos/___/dto.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/utils/dtos/___/dto.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/server.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/utils/storage.py" beforeDir="false" afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/storage.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/app/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,6 +46,8 @@
     "Python.base.executor": "Run",
     "Python.client.executor": "Run",
     "Python.direct.executor": "Run",
+    "Python.example (1).executor": "Run",
+    "Python.example.executor": "Run",
     "Python.helpers.executor": "Run",
     "Python.llm_chat.executor": "Run",
     "Python.llm_chess.executor": "Run",
@@ -59,8 +57,12 @@
     "Python.loader (1).executor": "Run",
     "Python.loader (2).executor": "Run",
     "Python.loader (3).executor": "Run",
+    "Python.loader (4).executor": "Run",
     "Python.loader.executor": "Run",
     "Python.main.executor": "Run",
+    "Python.scratch_5.executor": "Run",
+    "Python.script (1).executor": "Run",
+    "Python.script.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
@@ -68,7 +70,7 @@
     "codeWithMe.voiceChat.enabledByDefault": "false",
     "git-widget-placeholder": "main",
     "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "/Users/kervin/Desktop/code/resume_demos/app/lib/news",
+    "last_opened_file_path": "/Users/mini/Desktop/code/resume_demos/aa/files",
     "nodejs_package_manager_path": "npm",
     "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
     "vue.rearranger.settings.migration": "true"
@@ -81,20 +83,21 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/aa/files" />
+      <recent name="$PROJECT_DIR$/a" />
       <recent name="$PROJECT_DIR$/app/lib/news" />
       <recent name="$PROJECT_DIR$/app/lib" />
       <recent name="$PROJECT_DIR$/app/lib/weather" />
-      <recent name="$PROJECT_DIR$/app/lib/geo" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/a/files" />
       <recent name="$PROJECT_DIR$/HyperCoreSDK/python/helpers" />
       <recent name="$PROJECT_DIR$/HyperCoreSDK/python" />
       <recent name="$PROJECT_DIR$/app/utils/dtos/___" />
       <recent name="$PROJECT_DIR$/app/utils/dtos" />
-      <recent name="$PROJECT_DIR$/app/lib/news" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.loader (3)">
+  <component name="RunManager" selected="Python.example (1)">
     <configuration name="base" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
@@ -118,7 +121,30 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="loader (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="example (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/example.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="example" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -132,7 +158,7 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/loader.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/example.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -141,7 +167,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="loader (3)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="loader" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -187,7 +213,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="loader" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="script (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -196,12 +222,12 @@
         <env name="PYTHONUNBUFFERED" value="1" />
       </envs>
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/geo" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/aa" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/geo/loader.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/aa/script.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -212,11 +238,11 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.example (1)" />
         <item itemvalue="Python.base" />
-        <item itemvalue="Python.loader (3)" />
-        <item itemvalue="Python.loader (1)" />
         <item itemvalue="Python.loader" />
-        <item itemvalue="Python.loader" />
+        <item itemvalue="Python.example" />
+        <item itemvalue="Python.script (1)" />
       </list>
     </recent_temporary>
   </component>

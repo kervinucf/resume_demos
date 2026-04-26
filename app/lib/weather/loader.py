@@ -87,7 +87,6 @@ def location_from_data(data: dict[str, Any]) -> Location | None:
     except (KeyError, TypeError, ValueError):
         return None
 
-
 def location_filter(data: dict[str, Any]) -> bool:
     country_code = LOCATION_QUERY.get("country_code")
 
@@ -205,6 +204,8 @@ def write_observation(client: HyperClient, loc: Location) -> str:
 def main(client: HyperClient) -> int:
     try:
         count = 0
+        selected = 0
+        print("loading observations....", flush=True)
 
         for loc in client.select_records(
             root=GEO_ROOT,
@@ -214,17 +215,24 @@ def main(client: HyperClient) -> int:
             where=location_filter,
             limit=LOCATION_QUERY["limit"],
         ):
+            selected += 1
+            print(
+                f"selected {selected}: {loc.name} ({loc.country_code}) "
+                f"pop={getattr(loc, 'population', None)}",
+                flush=True,
+            )
+
+            print(f"  fetching weather for {loc.name}...", flush=True)
             msg = write_observation(client, loc)
             count += 1
 
-            if count % 100 == 0:
-                print(f"  {count:,} observations… [{msg}]")
+            print(f"  wrote {count}: {msg}", flush=True)
 
-        print(f"done: wrote {count:,} observations")
+        print(f"done: selected {selected:,}, wrote {count:,} observations", flush=True)
 
     finally:
         if client.owns_relay():
-            print(f"relay still running at {client.url} (Ctrl-C to stop)")
+            print(f"relay still running at {client.url} (Ctrl-C to stop)", flush=True)
             try:
                 client._owned.process.wait()
             except KeyboardInterrupt:
@@ -235,8 +243,6 @@ def main(client: HyperClient) -> int:
             client.close()
 
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(
         main(

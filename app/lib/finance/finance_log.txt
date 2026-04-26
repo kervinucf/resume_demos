@@ -1,0 +1,2204 @@
+2026-04-25 22:22:40 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-04-25 22:22:40 [ERROR] 
+1 Failed download:
+2026-04-25 22:22:40 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)
+2026-04-25 23:54:34 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-04-25 23:54:34 [ERROR] 
+1 Failed download:
+2026-04-25 23:54:34 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)
+2026-04-26 00:16:52 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-04-26 00:16:53 [ERROR] 
+1 Failed download:
+2026-04-26 00:16:53 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)
+2026-04-26 02:03:43 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-04-26 02:03:43 [ERROR] 
+1 Failed download:
+2026-04-26 02:03:43 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->JPY: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->CNY: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->INR: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->KRW: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->HKD: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->SGD: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->MYR: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->THB: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->IDR: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->PHP: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->PKR: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->BDT: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->VND: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->TWD: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->AED: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->SAR: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->ILS: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->TRY: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->AUD: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->NZD: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->PGK: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->WST: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->TOP: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:03:44 [ERROR] FX write failed for USD->VUV: URLError: <urlopen error [Errno 61] Connection refused>
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1321, in do_open
+    h.request(req.get_method(), req.selector, req.data, headers,
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+              encode_chunked=req.has_header('Transfer-encoding'))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1338, in request
+    self._send_request(method, url, body, headers, encode_chunked)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1384, in _send_request
+    self.endheaders(body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1333, in endheaders
+    self._send_output(message_body, encode_chunked=encode_chunked)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1093, in _send_output
+    self.send(msg)
+    ~~~~~~~~~^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1037, in send
+    self.connect()
+    ~~~~~~~~~~~~^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py", line 1003, in connect
+    self.sock = self._create_connection(
+                ~~~~~~~~~~~~~~~~~~~~~~~^
+        (self.host,self.port), self.timeout, self.source_address)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 870, in create_connection
+    raise exceptions[0]
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 855, in create_connection
+    sock.connect(sa)
+    ~~~~~~~~~~~~^^^^
+ConnectionRefusedError: [Errno 61] Connection refused
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 946, in sync_exchange_rates
+    path = write_fx_rate(
+        client,
+    ...<4 lines>...
+        observed_at=observed_at,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/app/lib/finance/loader.py", line 761, in write_fx_rate
+    client.write_record_with_indexes(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        root=FINANCE_ROOT,
+        ^^^^^^^^^^^^^^^^^^
+    ...<12 lines>...
+        },
+        ^^
+    )
+    ^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 732, in write_record_with_indexes
+    return write_record_with_indexes(
+        self,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/records.py", line 479, in write_record_with_indexes
+    return upsert_with_indexes(
+        client,
+    ...<7 lines>...
+        actions=actions,
+    )
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/helpers/indexes.py", line 529, in upsert_with_indexes
+    result = hc.batch(root=effective_root, ops=ops)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 503, in batch
+    return self._request("POST", endpoint, data={"ops": ops}, timeout=DEFAULT_HTTP_TIMEOUT_S)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 440, in _request
+    return _http(url, method=method, data=data, timeout=timeout)
+  File "/Users/mini/Desktop/code/resume_demos/HyperCoreSDK/python/client.py", line 81, in _http
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 187, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 487, in open
+    response = self._open(req, data)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 504, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 464, in _call_chain
+    result = func(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1350, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.14/lib/python3.14/urllib/request.py", line 1324, in do_open
+    raise URLError(err)
+urllib.error.URLError: <urlopen error [Errno 61] Connection refused>
+2026-04-26 02:05:27 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-04-26 02:05:27 [ERROR] 
+1 Failed download:
+2026-04-26 02:05:27 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)
