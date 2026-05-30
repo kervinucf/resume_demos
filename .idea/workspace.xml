@@ -4,7 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="" />
+    <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/HyperCoreSDK/python/helpers/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/earthquake/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/earthquake/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/example.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/example.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/geo/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/geo/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/news/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/news/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/sports/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/sports/loader.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/lib/weather/loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/lib/weather/loader.py" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -28,47 +37,51 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.base.executor": "Run",
-    "Python.client.executor": "Run",
-    "Python.direct.executor": "Run",
-    "Python.example (1).executor": "Run",
-    "Python.example.executor": "Run",
-    "Python.helpers.executor": "Run",
-    "Python.llm_chat.executor": "Run",
-    "Python.llm_chess.executor": "Run",
-    "Python.llm_etch_sketch.executor": "Run",
-    "Python.llm_ttt.executor": "Run",
-    "Python.load_locations.executor": "Run",
-    "Python.loader (1).executor": "Run",
-    "Python.loader (2).executor": "Run",
-    "Python.loader (3).executor": "Run",
-    "Python.loader (4).executor": "Run",
-    "Python.loader.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.scratch_5.executor": "Run",
-    "Python.script (1).executor": "Run",
-    "Python.script.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "codeWithMe.voiceChat.enabledByDefault": "false",
-    "git-widget-placeholder": "main",
-    "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "/Users/mini/Desktop/code/resume_demos/aa/files",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.base.executor&quot;: &quot;Run&quot;,
+    &quot;Python.client.executor&quot;: &quot;Run&quot;,
+    &quot;Python.direct.executor&quot;: &quot;Run&quot;,
+    &quot;Python.example (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.example.executor&quot;: &quot;Run&quot;,
+    &quot;Python.helpers.executor&quot;: &quot;Run&quot;,
+    &quot;Python.llm_chat.executor&quot;: &quot;Run&quot;,
+    &quot;Python.llm_chess.executor&quot;: &quot;Run&quot;,
+    &quot;Python.llm_etch_sketch.executor&quot;: &quot;Run&quot;,
+    &quot;Python.llm_ttt.executor&quot;: &quot;Run&quot;,
+    &quot;Python.load_locations.executor&quot;: &quot;Run&quot;,
+    &quot;Python.loader (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.loader (2).executor&quot;: &quot;Run&quot;,
+    &quot;Python.loader (3).executor&quot;: &quot;Run&quot;,
+    &quot;Python.loader (4).executor&quot;: &quot;Run&quot;,
+    &quot;Python.loader.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.scratch_5.executor&quot;: &quot;Run&quot;,
+    &quot;Python.script (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.script.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/mini/Desktop/code/resume_demos/aa/files&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
-  "keyToStringList": {
-    "com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File": [
-      "TEXT"
+  &quot;keyToStringList&quot;: {
+    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
+      &quot;DockerIgnore&quot;,
+      &quot;TEXT&quot;
     ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/aa/files" />
@@ -85,7 +98,7 @@
       <recent name="$PROJECT_DIR$/app/utils/dtos" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.example (1)">
+  <component name="RunManager" selected="Python.base">
     <configuration name="base" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
@@ -99,6 +112,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/base.py" />
       <option name="PARAMETERS" value="" />
@@ -122,6 +136,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/example.py" />
       <option name="PARAMETERS" value="" />
@@ -132,7 +147,31 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="example" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="loader (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="resume_demos" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/app/lib/geo" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/geo/loader.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="loader (2)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="resume_demos" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -145,8 +184,9 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/example.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/weather/loader.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -168,6 +208,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/app/lib/sports/loader.py" />
       <option name="PARAMETERS" value="" />
@@ -201,42 +242,20 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="script (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="resume_demos" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/aa" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="RUN_TOOL" value="" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/aa/script.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.example (1)" />
         <item itemvalue="Python.base" />
+        <item itemvalue="Python.loader (2)" />
+        <item itemvalue="Python.loader (1)" />
+        <item itemvalue="Python.example (1)" />
         <item itemvalue="Python.loader" />
-        <item itemvalue="Python.example" />
-        <item itemvalue="Python.script (1)" />
       </list>
     </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.31033.139" />
         <option value="bundled-python-sdk-2653e85de345-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.31033.139" />
       </set>
     </attachedChunks>
@@ -252,6 +271,8 @@
       <workItem from="1776819933737" duration="2422000" />
       <workItem from="1776822444729" duration="53000" />
       <workItem from="1776822509293" duration="5785000" />
+      <workItem from="1779779215777" duration="2856000" />
+      <workItem from="1780039676973" duration="2022000" />
     </task>
     <servers />
   </component>
@@ -260,5 +281,9 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/resume_demos$load_locations.coverage" NAME="load_locations Coverage Results" MODIFIED="1776822121159" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/lib/geo" />
+    <SUITE FILE_PATH="coverage/resume_demos$loader__1_.coverage" NAME="loader (1) Coverage Results" MODIFIED="1780041245387" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/lib/geo" />
+    <SUITE FILE_PATH="coverage/resume_demos$loader__2_.coverage" NAME="loader (2) Coverage Results" MODIFIED="1780041319275" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/lib/weather" />
+    <SUITE FILE_PATH="coverage/resume_demos$example__1_.coverage" NAME="example (1) Coverage Results" MODIFIED="1779779259480" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/lib" />
+    <SUITE FILE_PATH="coverage/resume_demos$base.coverage" NAME="base Coverage Results" MODIFIED="1780041460870" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/app/lib" />
   </component>
 </project>

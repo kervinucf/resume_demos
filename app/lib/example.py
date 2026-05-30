@@ -1,39 +1,53 @@
 #!/usr/bin/env python3
 """
-hyper_display_4545.py
+earth_app_show_server.py
 
-A general-purpose display computer for HyperCore / hypergraph query results.
+Earth.app Show Runtime
+======================
 
-This server does not know weather, sports, news, finance, atproto, etc.
-It renders whatever the hypergraph returns by inspecting:
+A self-contained Python show server that turns a HyperCore / hypergraph relay
+into an always-on, TBPN-style live Earth feed.
 
-  - entity_id
-  - entity_type
-  - canonical_path
-  - display
-  - facets
-  - numbers / measures
-  - times
-  - refs
-  - cells
-  - filters returned by /query/entities or /api/query/entities
+This file intentionally does NOT hard-code weather/news/sports/social/markets
+channels. The show follows the hypergraph:
 
-It supports:
+  1. Start at the relay root.
+  2. Discover _links.query.
+  3. Discover _actions.search.
+  4. Run the advertised search action.
+  5. Read returned _embedded results and data.filters.
+  6. Build temporary show lanes from discovered types, paths, facets, refs,
+     measures, and time fields.
+  7. Follow advertised record/self links for detail segments.
+  8. Render the current state as a live show.
+
+Run:
+
+  HYPER_URL=http://127.0.0.1:8765 python earth_app_show_server.py
+
+Open:
 
   http://127.0.0.1:4545
-  http://127.0.0.1:4545?q=Trump
-  http://127.0.0.1:4545?type=news_article
-  http://127.0.0.1:4545?facet=source:nyt
-  http://127.0.0.1:4545?source=http%3A%2F%2F127.0.0.1%3A8765%2Fquery%2Fentities%3Fq%3DTrump
+  http://127.0.0.1:4545?q=chicago
+  http://127.0.0.1:4545?type=news_latest
+  http://127.0.0.1:4545?facet=source:bbc
 
-Core idea:
-  A query result is itself a displayable hypermedia state.
-  The display computes frames/channels from available graph affordances.
+Environment:
+
+  EARTH_APP_PORT=4545
+  HYPER_URL=http://127.0.0.1:8765
+  EARTH_APP_LIMIT=220
+  EARTH_APP_CADENCE_SECONDS=9
+  EARTH_APP_MAX_PAGES=2
+
+The product idea:
+
+  The show is not a playlist.
+  The show is a traversal through live application state.
 """
 
 from __future__ import annotations
 
-import hashlib
 import html
 import json
 import math
@@ -44,7 +58,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -54,76 +68,22 @@ from typing import Any
 # Configuration
 # =============================================================================
 
-PORT = int(os.getenv("HYPER_DISPLAY_PORT", "4545"))
+PORT = int(os.getenv("EARTH_APP_PORT", os.getenv("HYPER_DISPLAY_PORT", "4545")))
 HYPER_URL = os.getenv("HYPER_URL", "http://127.0.0.1:8765").rstrip("/")
-DEFAULT_LIMIT = int(os.getenv("HYPER_DISPLAY_LIMIT", "250"))
-DEFAULT_CADENCE_SECONDS = float(os.getenv("HYPER_DISPLAY_CADENCE_SECONDS", "8"))
+DEFAULT_LIMIT = int(os.getenv("EARTH_APP_LIMIT", "220"))
+DEFAULT_CADENCE_SECONDS = float(os.getenv("EARTH_APP_CADENCE_SECONDS", "9"))
+MAX_PAGES = max(1, int(os.getenv("EARTH_APP_MAX_PAGES", "2")))
+HTTP_TIMEOUT_SECONDS = float(os.getenv("EARTH_APP_HTTP_TIMEOUT_SECONDS", "15"))
 
 Json = dict[str, Any]
 
 
 # =============================================================================
-# Relay / HTTP client
+# URL and primitive helpers
 # =============================================================================
 
-class Relay:
-    def __init__(self, base_url: str) -> None:
-        self.base_url = base_url.rstrip("/")
-
-    def get_json(self, path_or_url: str, *, timeout: float = 15.0) -> Json:
-        if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
-            url = path_or_url
-        else:
-            path = path_or_url if path_or_url.startswith("/") else "/" + path_or_url
-            url = f"{self.base_url}{path}"
-
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", "replace")
-            return json.loads(raw or "{}")
-
-    def query_entities(self, pairs: list[tuple[str, str]]) -> Json:
-        query = urllib.parse.urlencode(pairs, doseq=True)
-        return self.get_json(f"/api/query/entities?{query}")
-
-
-# =============================================================================
-# Generic entity model
-# =============================================================================
-
-@dataclass(frozen=True)
-class Entity:
-    entity_id: str
-    entity_type: str
-    canonical_path: str
-    display: str
-    updated_at: int | None
-    commit_seq: int | None
-    score: float | None
-    facets: dict[str, list[str]]
-    numbers: dict[str, float]
-    times: dict[str, int]
-    refs: dict[str, list[str]]
-    cells: dict[str, list[str]]
-    matched_by: Json | None
-    raw: Json
-
-
-@dataclass
-class QueryState:
-    label: str
-    source_url: str | None
-    request_pairs: list[tuple[str, str]]
-    raw_doc: Json
-    entities: list[Entity]
-    filters: Json
-
-
-def slug(value: Any, fallback: str = "item") -> str:
-    text = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower())
-    text = re.sub(r"-{2,}", "-", text).strip("-")
-    return text or fallback
+def now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def safe_float(value: Any) -> float | None:
@@ -153,8 +113,359 @@ def as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def slug(value: Any, fallback: str = "node") -> str:
+    text = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower())
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text or fallback
+
+
+def esc(value: Any) -> str:
+    return html.escape(str(value if value is not None else ""))
+
+
+def titleize(value: Any) -> str:
+    text = str(value or "").replace("_", " ").replace("-", " ").replace(".", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.title() if text else "Earth"
+
+
+def compact_key(value: Any) -> str:
+    text = str(value or "")
+    tail = text.rsplit(".", 1)[-1]
+    return titleize(tail)
+
+
+def dedup(values: list[Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def format_number(value: float) -> str:
+    if abs(value) >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.1f}B"
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if abs(value) >= 10_000:
+        return f"{value:,.0f}"
+    if abs(value) >= 100:
+        return f"{value:.0f}"
+    if abs(value) >= 10:
+        return f"{value:.1f}"
+    return f"{value:.2f}"
+
+
+def iso_label(ms: int | None) -> str:
+    if not ms:
+        return ""
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        return ""
+
+
+def time_ago(ms: int | None) -> str:
+    if not ms:
+        return "unknown"
+    delta = max(0, now_ms() - ms)
+    seconds = delta // 1000
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+def parse_query_string(query: str) -> dict[str, list[str]]:
+    return urllib.parse.parse_qs(query, keep_blank_values=False)
+
+
+def add_query(url: str, params: dict[str, Any] | list[tuple[str, Any]]) -> str:
+    parsed = urllib.parse.urlparse(url)
+    pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=False)
+
+    iterable = params.items() if isinstance(params, dict) else params
+
+    for key, value in iterable:
+        if value is None or value == "":
+            continue
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if item is not None and str(item) != "":
+                    pairs.append((str(key), str(item)))
+        else:
+            pairs.append((str(key), str(value)))
+
+    query = urllib.parse.urlencode(pairs, doseq=True)
+    return urllib.parse.urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        parsed.params,
+        query,
+        parsed.fragment,
+    ))
+
+
+def href_for_params(params: list[tuple[str, str]]) -> str:
+    return "/?" + urllib.parse.urlencode(params, doseq=True) if params else "/"
+
+
+# =============================================================================
+# Hypermedia agent
+# =============================================================================
+
+class HypermediaError(RuntimeError):
+    pass
+
+
+class HypermediaAgent:
+    """Tiny runtime that discovers and follows relay affordances."""
+
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url.rstrip("/") + "/"
+
+    def resolve(self, href: str) -> str:
+        return urllib.parse.urljoin(self.base_url, href)
+
+    def get_json(self, href: str, *, timeout: float = HTTP_TIMEOUT_SECONDS) -> Json:
+        url = self.resolve(href)
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+            try:
+                return json.loads(raw or "{}")
+            except json.JSONDecodeError as exc:
+                raise HypermediaError(f"Expected JSON from {url}, got non-JSON") from exc
+
+    def links(self, doc: Json) -> dict[str, str]:
+        raw = doc.get("_links") or {}
+        out: dict[str, str] = {}
+        if not isinstance(raw, dict):
+            return out
+
+        for rel, value in raw.items():
+            href = None
+            if isinstance(value, str):
+                href = value
+            elif isinstance(value, dict) and isinstance(value.get("href"), str):
+                href = value["href"]
+            if href:
+                out[str(rel)] = self.resolve(href)
+        return out
+
+    def link(self, doc: Json, *rels: str) -> str | None:
+        links = self.links(doc)
+        for rel in rels:
+            href = links.get(rel)
+            if href:
+                return href
+        return None
+
+    def actions(self, doc: Json) -> dict[str, Json]:
+        raw = doc.get("_actions") or {}
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+
+    def action(self, doc: Json, *names: str) -> Json | None:
+        actions = self.actions(doc)
+        for name in names:
+            action = actions.get(name)
+            if action:
+                return action
+        return None
+
+    def submit_get_action(self, action: Json, params: dict[str, Any] | list[tuple[str, Any]]) -> Json:
+        method = str(action.get("method") or "GET").upper()
+        href = action.get("href")
+
+        if method != "GET":
+            raise HypermediaError(f"Earth.app only knows how to render GET actions; got {method}")
+        if not isinstance(href, str) or not href:
+            raise HypermediaError("Search action did not advertise a usable href")
+
+        return self.get_json(add_query(self.resolve(href), params))
+
+    def fallback_search_action(self) -> Json:
+        return {
+            "method": "GET",
+            "href": self.resolve("/api/query/entities"),
+            "fields": [
+                {"name": "q", "hint": "full-text query"},
+                {"name": "type", "hint": "entity type"},
+                {"name": "facet", "hint": "name:value"},
+                {"name": "has_ref", "hint": "rel"},
+                {"name": "include", "hint": "facets,refs,numbers,times,cells"},
+            ],
+            "title": "Fallback entity query",
+        }
+
+    def discover(self) -> "Discovery":
+        root = self.get_json("/")
+        query_home: Json = {}
+
+        query_href = self.link(root, "query")
+        if query_href:
+            try:
+                query_home = self.get_json(query_href)
+            except Exception:
+                query_home = {}
+
+        search_action = (
+            self.action(query_home, "search", "query", "entities")
+            or self.action(root, "search", "query", "entities")
+            or self.fallback_search_action()
+        )
+
+        return Discovery(
+            root=root,
+            query_home=query_home,
+            search_action=search_action,
+            root_links=self.links(root),
+            query_links=self.links(query_home) if query_home else {},
+            root_actions=self.actions(root),
+            query_actions=self.actions(query_home) if query_home else {},
+        )
+
+
+@dataclass
+class Discovery:
+    root: Json
+    query_home: Json
+    search_action: Json
+    root_links: dict[str, str]
+    query_links: dict[str, str]
+    root_actions: dict[str, Json]
+    query_actions: dict[str, Json]
+
+    @property
+    def search_href(self) -> str:
+        return str(self.search_action.get("href") or "")
+
+
+# =============================================================================
+# Normalized query entities
+# =============================================================================
+
+@dataclass(frozen=True)
+class Entity:
+    entity_id: str
+    entity_type: str
+    canonical_path: str
+    display: str
+    text: str
+    score: float | None
+    updated_at: int | None
+    commit_seq: int | None
+    facets: dict[str, list[str]]
+    numbers: dict[str, float]
+    times: dict[str, int]
+    refs: dict[str, list[str]]
+    cells: dict[str, list[str]]
+    links: dict[str, str]
+    state: Json
+    raw: Json
+
+    @property
+    def root(self) -> str:
+        return (self.canonical_path or self.entity_id or "earth").split(".", 1)[0] or "earth"
+
+    @property
+    def ref_count(self) -> int:
+        return sum(len(values) for values in self.refs.values())
+
+    @property
+    def newest_ms(self) -> int:
+        preferred = (
+            "activity_latest_at",
+            "received_at",
+            "updated_at",
+            "fetched_at",
+            "observed_at",
+            "published_at",
+            "created_at",
+            "start_time",
+            "time",
+        )
+        for key in preferred:
+            if key in self.times:
+                return self.times[key]
+        if self.times:
+            return max(self.times.values())
+        return self.updated_at or 0
+
+
+@dataclass
+class QueryState:
+    label: str
+    request_params: list[tuple[str, str]]
+    docs: list[Json]
+    entities: list[Entity]
+    filters: Json
+    next_href: str | None
+    total: int | None
+
+
+@dataclass
+class Lane:
+    id: str
+    label: str
+    kind: str
+    href: str
+    count: int
+    reason: str
+
+
+@dataclass
+class Segment:
+    id: str
+    label: str
+    title: str
+    dek: str
+    why: str
+    mode: str
+    entities: list[Entity]
+    metric_label: str = ""
+    stats: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RecordDetail:
+    href: str
+    title: str
+    summary: str
+    kind: str
+    path: str
+    links: dict[str, str]
+    actions: dict[str, Json]
+    raw: Json
+
+
 def rows_to_multi_map(rows: Any, *, key_field: str, value_field: str) -> dict[str, list[str]]:
     out: dict[str, list[str]] = defaultdict(list)
+
+    if isinstance(rows, dict):
+        for key, value in rows.items():
+            for item in as_list(value):
+                if item is not None:
+                    out[str(key)].append(str(item))
+        return dict(out)
 
     if not isinstance(rows, list):
         return {}
@@ -162,13 +473,10 @@ def rows_to_multi_map(rows: Any, *, key_field: str, value_field: str) -> dict[st
     for row in rows:
         if not isinstance(row, dict):
             continue
-
         key = row.get(key_field)
         value = row.get(value_field)
-
         if key is None or value is None:
             continue
-
         out[str(key)].append(str(value))
 
     return dict(out)
@@ -177,16 +485,21 @@ def rows_to_multi_map(rows: Any, *, key_field: str, value_field: str) -> dict[st
 def rows_to_number_map(rows: Any) -> dict[str, float]:
     out: dict[str, float] = {}
 
+    if isinstance(rows, dict):
+        for key, value in rows.items():
+            n = safe_float(value)
+            if n is not None:
+                out[str(key)] = n
+        return out
+
     if not isinstance(rows, list):
         return out
 
     for row in rows:
         if not isinstance(row, dict):
             continue
-
         name = row.get("name")
         value = safe_float(row.get("value"))
-
         if name is not None and value is not None:
             out[str(name)] = value
 
@@ -196,108 +509,165 @@ def rows_to_number_map(rows: Any) -> dict[str, float]:
 def rows_to_time_map(rows: Any) -> dict[str, int]:
     out: dict[str, int] = {}
 
+    if isinstance(rows, dict):
+        for key, value in rows.items():
+            n = safe_int(value)
+            if n is not None:
+                out[str(key)] = n
+        return out
+
     if not isinstance(rows, list):
         return out
 
     for row in rows:
         if not isinstance(row, dict):
             continue
-
         name = row.get("name")
-        value = safe_int(row.get("value_ms"))
-
+        value = safe_int(row.get("value_ms") or row.get("value"))
         if name is not None and value is not None:
             out[str(name)] = value
 
     return out
 
 
-def unwrap_item(raw: Json) -> Json:
+def normalize_links(raw: Json, agent: HypermediaAgent | None = None) -> dict[str, str]:
+    out: dict[str, str] = {}
+
+    for bucket_name in ("_links", "links"):
+        bucket = raw.get(bucket_name)
+        if not isinstance(bucket, dict):
+            continue
+
+        for rel, value in bucket.items():
+            href = None
+            if isinstance(value, str):
+                href = value
+            elif isinstance(value, dict) and isinstance(value.get("href"), str):
+                href = value["href"]
+
+            if href:
+                out[str(rel)] = agent.resolve(href) if agent else href
+
+    return out
+
+
+def unwrap_query_payload(raw: Json) -> tuple[Json, Json, Json, Json]:
     """
-    /api/query/entities:
-      _embedded.<id>.data = query item
+    Returns (payload, data, state, wrapper_links_source).
 
-    /query/entities:
-      items[] = query item
-
-    direct node docs:
-      data = payload
+    Query result shapes vary:
+      - _embedded.<id>.data = query item
+      - _embedded.<id>.data.query = query item
+      - items[] = query item
+      - direct node docs with _state and data
     """
-    if isinstance(raw.get("data"), dict):
-        data = raw["data"]
-        if "entity_id" in data or "canonical_path" in data:
-            return data
+    state = raw.get("_state") if isinstance(raw.get("_state"), dict) else {}
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
 
-    return raw
+    if isinstance(data.get("query"), dict):
+        return data["query"], data, state, raw
+
+    if any(key in data for key in ("entity_id", "canonical_path", "entity_type", "display", "facets", "numbers", "times", "refs")):
+        return data, data, state, raw
+
+    return raw, data, state, raw
 
 
-def normalize_entity(raw: Json) -> Entity:
-    item = unwrap_item(raw)
+def normalize_entity(raw: Json, agent: HypermediaAgent | None = None) -> Entity:
+    payload, data, state, wrapper = unwrap_query_payload(raw)
 
-    entity_id = str(item.get("entity_id") or item.get("canonical_path") or "")
-    canonical_path = str(item.get("canonical_path") or entity_id)
-    entity_type = str(item.get("entity_type") or "entity")
-    display = str(item.get("display") or canonical_path.rsplit(".", 1)[-1] or entity_type)
+    entity_id = str(
+        payload.get("entity_id")
+        or data.get("entity_id")
+        or payload.get("canonical_path")
+        or data.get("canonical_path")
+        or state.get("path")
+        or ""
+    )
+    canonical_path = str(payload.get("canonical_path") or data.get("canonical_path") or entity_id)
+    entity_type = str(payload.get("entity_type") or data.get("entity_type") or data.get("kind") or state.get("kind") or "entity")
+
+    display = str(
+        payload.get("display")
+        or data.get("display")
+        or data.get("title")
+        or data.get("name")
+        or state.get("summary")
+        or canonical_path.rsplit(".", 1)[-1]
+        or entity_type
+    )
+
+    text_parts = [
+        payload.get("text"),
+        data.get("text"),
+        data.get("summary"),
+        data.get("description"),
+        data.get("title"),
+    ]
+    text = " ".join(str(x) for x in text_parts if x)
+
+    links = {}
+    links.update(normalize_links(wrapper, agent))
+    links.update(normalize_links(data, agent))
+    links.update(normalize_links(payload, agent))
 
     return Entity(
         entity_id=entity_id,
         entity_type=entity_type,
         canonical_path=canonical_path,
         display=display,
-        updated_at=safe_int(item.get("updated_at")),
-        commit_seq=safe_int(item.get("commit_seq")),
-        score=safe_float(item.get("score")),
-        facets=rows_to_multi_map(item.get("facets"), key_field="name", value_field="value"),
-        numbers=rows_to_number_map(item.get("numbers")),
-        times=rows_to_time_map(item.get("times")),
-        refs=rows_to_multi_map(item.get("refs"), key_field="rel", value_field="target_id"),
-        cells=rows_to_multi_map(item.get("cells"), key_field="scheme", value_field="value"),
-        matched_by=item.get("matched_by") if isinstance(item.get("matched_by"), dict) else None,
-        raw=item,
+        text=text,
+        score=safe_float(payload.get("score") or data.get("score")),
+        updated_at=safe_int(payload.get("updated_at") or data.get("updated_at") or state.get("updated_at")),
+        commit_seq=safe_int(payload.get("commit_seq") or data.get("commit_seq") or state.get("commit_seq")),
+        facets=rows_to_multi_map(payload.get("facets") or data.get("facets"), key_field="name", value_field="value"),
+        numbers=rows_to_number_map(payload.get("numbers") or data.get("numbers")),
+        times=rows_to_time_map(payload.get("times") or data.get("times")),
+        refs=rows_to_multi_map(payload.get("refs") or data.get("refs"), key_field="rel", value_field="target_id"),
+        cells=rows_to_multi_map(payload.get("cells") or data.get("cells"), key_field="scheme", value_field="value"),
+        links=links,
+        state=state,
+        raw=raw,
     )
 
 
-def entities_from_doc(doc: Json) -> list[Entity]:
-    embedded = doc.get("_embedded") or {}
+def embedded_items(doc: Json) -> list[Json]:
+    embedded = doc.get("_embedded")
+    out: list[Json] = []
 
-    if isinstance(embedded, dict) and embedded:
-        entities = []
+    if isinstance(embedded, dict):
+        children = embedded.get("children")
+        if isinstance(children, dict):
+            for value in children.values():
+                if isinstance(value, dict):
+                    out.append(value)
+            return out
+
         for value in embedded.values():
             if isinstance(value, dict):
-                entities.append(normalize_entity(value))
-        return entities
+                out.append(value)
+        return out
 
     items = None
-
     if isinstance(doc.get("items"), list):
         items = doc.get("items")
     elif isinstance(doc.get("data"), dict) and isinstance(doc["data"].get("items"), list):
         items = doc["data"]["items"]
 
     if isinstance(items, list):
-        return [
-            normalize_entity(item)
-            for item in items
-            if isinstance(item, dict)
-        ]
+        return [item for item in items if isinstance(item, dict)]
 
-    # If someone points source= at a single graph node, turn it into one entity.
-    if "_state" in doc or "data" in doc:
-        state = doc.get("_state") if isinstance(doc.get("_state"), dict) else {}
-        data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    return []
 
-        pseudo = {
-            "entity_id": state.get("path") or data.get("entity_id") or data.get("canonical_path") or "source.node",
-            "entity_type": data.get("kind") or data.get("type") or state.get("kind") or "node",
-            "canonical_path": state.get("path") or data.get("canonical_path") or "source.node",
-            "display": data.get("name") or data.get("title") or data.get("display") or state.get("summary") or state.get("path") or "Source Node",
-            "facets": [],
-            "numbers": [],
-            "times": [],
-            "refs": [],
-            "cells": [],
-        }
-        return [normalize_entity(pseudo)]
+
+def entities_from_doc(doc: Json, agent: HypermediaAgent | None = None) -> list[Entity]:
+    items = embedded_items(doc)
+    if items:
+        return [normalize_entity(item, agent) for item in items]
+
+    # Direct record/node document fallback.
+    if isinstance(doc, dict) and ("_state" in doc or "data" in doc):
+        return [normalize_entity(doc, agent)]
 
     return []
 
@@ -305,88 +675,113 @@ def entities_from_doc(doc: Json) -> list[Entity]:
 def filters_from_doc(doc: Json) -> Json:
     if isinstance(doc.get("filters"), dict):
         return doc["filters"]
-    if isinstance(doc.get("data"), dict) and isinstance(doc["data"].get("filters"), dict):
-        return doc["data"]["filters"]
+    data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    if isinstance(data.get("filters"), dict):
+        return data["filters"]
     return {}
 
 
-# =============================================================================
-# Query input modes
-# =============================================================================
-
-PASSTHROUGH_QUERY_KEYS = {
-    "q",
-    "type",
-    "facet",
-    "has_ref",
-    "ref",
-    "cell",
-    "time_gte",
-    "time_lte",
-    "number_gte",
-    "number_lte",
-    "number_between",
-    "bbox",
-    "radius",
-    "radius_mode",
-    "measure_scope",
-    "graph_scope",
-    "graph_dir",
-    "sort",
-    "match",
-    "exclude_path_fragment",
-}
-
-CONTROL_PARAMS = {
-    "frame",
-    "cadence",
-    "limit",
-    "source",
-    "query",
-    "auto",
-}
+def total_from_doc(doc: Json) -> int | None:
+    data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+    return safe_int(data.get("total"))
 
 
-def has_user_query(params: dict[str, list[str]]) -> bool:
-    if params.get("source") or params.get("query"):
-        return True
+def merge_filters(filters_list: list[Json]) -> Json:
+    """Best-effort merge of filter summaries across fetched pages."""
+    out: Json = {
+        "types": [],
+        "paths": [],
+        "refs": [],
+        "measures": [],
+        "times": [],
+        "facets": {},
+    }
 
-    for key, values in params.items():
-        if key in CONTROL_PARAMS:
-            continue
-        if key in PASSTHROUGH_QUERY_KEYS and any(str(v).strip() for v in values):
-            return True
+    row_buckets: dict[str, dict[str, dict[str, Any]]] = {
+        "types": {},
+        "paths": {},
+        "refs": {},
+        "measures": {},
+        "times": {},
+    }
 
-    return False
+    for filters in filters_list:
+        for bucket_name in ("types", "paths", "refs", "measures", "times"):
+            rows = filters.get(bucket_name) or []
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                key = row.get("value") or row.get("name") or row.get("rel")
+                if key is None:
+                    continue
+                key = str(key)
+                old = row_buckets[bucket_name].get(key, {})
+                count = max(safe_int(old.get("count")) or 0, safe_int(row.get("count")) or 0)
+                row_buckets[bucket_name][key] = {**old, **row, "count": count}
+
+        facets = filters.get("facets") or {}
+        if isinstance(facets, dict):
+            out_facets = out.setdefault("facets", {})
+            for facet_name, rows in facets.items():
+                bucket = out_facets.setdefault(str(facet_name), {})
+                if not isinstance(rows, list):
+                    continue
+                for row in rows:
+                    if not isinstance(row, dict) or row.get("value") is None:
+                        continue
+                    key = str(row["value"])
+                    old = bucket.get(key, {})
+                    count = max(safe_int(old.get("count")) or 0, safe_int(row.get("count")) or 0)
+                    bucket[key] = {**old, **row, "count": count}
+
+    for bucket_name, rows in row_buckets.items():
+        out[bucket_name] = list(rows.values())
+
+    facets_out = {}
+    for facet_name, row_map in (out.get("facets") or {}).items():
+        facets_out[facet_name] = list(row_map.values())
+    out["facets"] = facets_out
+
+    return out
 
 
-def cadence_from_params(params: dict[str, list[str]]) -> float:
-    raw = (params.get("cadence") or [DEFAULT_CADENCE_SECONDS])[0]
-    try:
-        return max(2.0, float(raw))
-    except Exception:
-        return DEFAULT_CADENCE_SECONDS
-
-
-def query_pairs_from_params(params: dict[str, list[str]], *, limit: int | None = None) -> list[tuple[str, str]]:
-    effective_limit = limit
-    if effective_limit is None:
-        effective_limit = int((params.get("limit") or [DEFAULT_LIMIT])[0])
+def request_params_from_browser(params: dict[str, list[str]], *, limit: int) -> list[tuple[str, str]]:
+    passthrough = {
+        "q",
+        "type",
+        "facet",
+        "has_ref",
+        "ref",
+        "cell",
+        "time_gte",
+        "time_lte",
+        "number_gte",
+        "number_lte",
+        "number_between",
+        "bbox",
+        "radius",
+        "radius_mode",
+        "measure_scope",
+        "graph_scope",
+        "graph_dir",
+        "sort",
+        "match",
+        "exclude_path_fragment",
+    }
 
     pairs: list[tuple[str, str]] = [
         ("include", "facets,refs,numbers,times,cells"),
-        ("limit", str(effective_limit)),
+        ("limit", str(limit)),
     ]
 
     if "sort" not in params:
         pairs.append(("sort", "score"))
 
     for key, values in params.items():
-        if key in CONTROL_PARAMS:
+        if key not in passthrough:
             continue
-        if key not in PASSTHROUGH_QUERY_KEYS:
-            continue
-
         for value in values:
             if value is not None and str(value).strip():
                 pairs.append((key, str(value)))
@@ -394,727 +789,303 @@ def query_pairs_from_params(params: dict[str, list[str]], *, limit: int | None =
     return pairs
 
 
-def params_from_pairs(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
-    return urllib.parse.parse_qs(urllib.parse.urlencode(pairs, doseq=True))
+def load_query_state(agent: HypermediaAgent, discovery: Discovery, browser_params: dict[str, list[str]]) -> QueryState:
+    limit = int((browser_params.get("limit") or [DEFAULT_LIMIT])[0])
+    request_params = request_params_from_browser(browser_params, limit=limit)
 
+    docs: list[Json] = []
+    entities: list[Entity] = []
+    filters_list: list[Json] = []
 
-def node_data(doc: Json) -> Json:
-    """
-    Extracts application data from relay node shapes.
-    """
-    if not isinstance(doc, dict):
-        return {}
+    first = agent.submit_get_action(discovery.search_action, request_params)
+    docs.append(first)
+    entities.extend(entities_from_doc(first, agent))
+    filters_list.append(filters_from_doc(first))
 
-    data = doc.get("data")
+    next_href = agent.link(first, "next")
+    page = 1
+    while next_href and page < MAX_PAGES:
+        try:
+            doc = agent.get_json(next_href)
+        except Exception:
+            break
+        docs.append(doc)
+        entities.extend(entities_from_doc(doc, agent))
+        filters_list.append(filters_from_doc(doc))
+        next_href = agent.link(doc, "next")
+        page += 1
 
-    if isinstance(data, dict) and isinstance(data.get("data"), dict):
-        return data["data"]
-
-    return data if isinstance(data, dict) else {}
-
-
-def pairs_from_query_resource(doc: Json) -> tuple[list[tuple[str, str]], Json]:
-    data = node_data(doc)
-    params = data.get("params") if isinstance(data.get("params"), dict) else {}
-
-    pairs: list[tuple[str, str]] = []
-
-    for key, value in params.items():
-        if isinstance(value, list):
-            for item in value:
-                pairs.append((str(key), str(item)))
-        elif value is not None:
-            pairs.append((str(key), str(value)))
-
-    if not any(k == "include" for k, _ in pairs):
-        pairs.append(("include", "facets,refs,numbers,times,cells"))
-
-    if not any(k == "limit" for k, _ in pairs):
-        pairs.append(("limit", str(DEFAULT_LIMIT)))
-
-    meta = {
-        "path": data.get("path"),
-        "name": data.get("name") or data.get("title") or "Display Query",
-        "description": data.get("description") or "",
-        "presentation": data.get("presentation") if isinstance(data.get("presentation"), dict) else {},
-        "intent": data.get("intent") if isinstance(data.get("intent"), dict) else {},
-        "raw": data,
-    }
-
-    return pairs, meta
-
-
-def load_query_state(relay: Relay, params: dict[str, list[str]], *, limit: int | None = None) -> tuple[QueryState, Json]:
-    """
-    Modes:
-      ?source=http://127.0.0.1:8765/query/entities?q=Trump
-      ?query=queries.display.trump
-      ?q=Trump
-      ?type=news_article
-      no params = broad query
-    """
-    source = (params.get("source") or [None])[0]
-    query_path = (params.get("query") or [None])[0]
-    query_meta: Json = {}
-
-    if source:
-        doc = relay.get_json(source)
-        entities = entities_from_doc(doc)
-        filters = filters_from_doc(doc)
-
-        return QueryState(
-            label=f"source={source}",
-            source_url=source,
-            request_pairs=[],
-            raw_doc=doc,
-            entities=entities,
-            filters=filters,
-        ), query_meta
-
-    if query_path:
-        doc = relay.get_json("/" + urllib.parse.quote(query_path, safe="."))
-        pairs, query_meta = pairs_from_query_resource(doc)
-        query_doc = relay.query_entities(pairs)
-
-        return QueryState(
-            label=f"query={query_path}",
-            source_url=None,
-            request_pairs=pairs,
-            raw_doc=query_doc,
-            entities=entities_from_doc(query_doc),
-            filters=filters_from_doc(query_doc),
-        ), query_meta
-
-    pairs = query_pairs_from_params(params, limit=limit)
-    query_doc = relay.query_entities(pairs)
-
-    label_parts = [
+    label_bits = [
         f"{key}={value}"
-        for key, value in pairs
+        for key, value in request_params
         if key not in {"include", "limit", "sort"}
     ]
-
-    label = " • ".join(label_parts) if label_parts else "broad graph sample"
+    label = " • ".join(label_bits) if label_bits else "root-discovered global state"
 
     return QueryState(
         label=label,
-        source_url=None,
-        request_pairs=pairs,
-        raw_doc=query_doc,
-        entities=entities_from_doc(query_doc),
-        filters=filters_from_doc(query_doc),
-    ), query_meta
+        request_params=request_params,
+        docs=docs,
+        entities=dedupe_entities(entities),
+        filters=merge_filters(filters_list),
+        next_href=next_href,
+        total=total_from_doc(first),
+    )
 
 
-# =============================================================================
-# Capability analysis
-# =============================================================================
-
-@dataclass
-class Capability:
-    entities: list[Entity]
-    type_counts: Counter[str]
-    path_counts: Counter[str]
-    facet_counts: dict[str, Counter[str]]
-    number_counts: Counter[str]
-    time_counts: Counter[str]
-    ref_counts: Counter[str]
-    cell_counts: Counter[str]
-    filter_summary: Json
-
-
-def path_fragments(path: str) -> list[str]:
-    parts = [p for p in str(path or "").split(".") if p]
-    out: list[str] = []
-
-    for i in range(1, min(len(parts), 4) + 1):
-        out.append(".".join(parts[:i]))
-
+def dedupe_entities(entities: list[Entity]) -> list[Entity]:
+    out: list[Entity] = []
+    seen: set[str] = set()
+    for entity in entities:
+        key = entity.entity_id or entity.canonical_path or f"{entity.entity_type}:{entity.display}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(entity)
     return out
 
 
-def merge_filter_summary_into_capability(cap: Capability, filters: Json) -> Capability:
-    """
-    The relay may already have richer filter summaries than the sampled page.
-    Fold those into counts when available.
-    """
-    for row in filters.get("types") or []:
-        if isinstance(row, dict) and row.get("value"):
-            cap.type_counts[str(row["value"])] = max(
-                cap.type_counts[str(row["value"])],
-                safe_int(row.get("count")) or 0,
-            )
+# =============================================================================
+# Affordance discovery
+# =============================================================================
 
-    for row in filters.get("paths") or []:
-        if isinstance(row, dict) and row.get("value"):
-            cap.path_counts[str(row["value"])] = max(
-                cap.path_counts[str(row["value"])],
-                safe_int(row.get("count")) or 0,
-            )
-
-    facets = filters.get("facets") or {}
-    if isinstance(facets, dict):
-        for name, rows in facets.items():
-            counter = cap.facet_counts.setdefault(str(name), Counter())
-            if isinstance(rows, list):
-                for row in rows:
-                    if isinstance(row, dict) and row.get("value") is not None:
-                        counter[str(row["value"])] = max(
-                            counter[str(row["value"])],
-                            safe_int(row.get("count")) or 0,
-                        )
-
-    for row in filters.get("refs") or []:
-        if isinstance(row, dict) and row.get("rel"):
-            cap.ref_counts[str(row["rel"])] = max(
-                cap.ref_counts[str(row["rel"])],
-                safe_int(row.get("count")) or 0,
-            )
-
-    for row in filters.get("measures") or []:
-        if isinstance(row, dict) and row.get("name"):
-            cap.number_counts[str(row["name"])] = max(
-                cap.number_counts[str(row["name"])],
-                safe_int(row.get("count")) or 0,
-            )
-
-    for row in filters.get("times") or []:
-        if isinstance(row, dict) and row.get("name"):
-            cap.time_counts[str(row["name"])] = max(
-                cap.time_counts[str(row["name"])],
-                safe_int(row.get("count")) or 0,
-            )
-
-    return cap
+def filter_rows(filters: Json, name: str) -> list[Json]:
+    rows = filters.get(name) or []
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
-def analyze(entities: list[Entity], filters: Json | None = None) -> Capability:
-    type_counts: Counter[str] = Counter()
-    path_counts: Counter[str] = Counter()
-    facet_counts: dict[str, Counter[str]] = defaultdict(Counter)
-    number_counts: Counter[str] = Counter()
-    time_counts: Counter[str] = Counter()
-    ref_counts: Counter[str] = Counter()
-    cell_counts: Counter[str] = Counter()
-
-    for entity in entities:
-        type_counts[entity.entity_type] += 1
-
-        for fragment in path_fragments(entity.canonical_path or entity.entity_id):
-            path_counts[fragment] += 1
-
-        for key, values in entity.facets.items():
-            for value in values:
-                facet_counts[key][value] += 1
-
-        for key in entity.numbers:
-            number_counts[key] += 1
-
-        for key in entity.times:
-            time_counts[key] += 1
-
-        for key, values in entity.refs.items():
-            ref_counts[key] += len(values)
-
-        for key, values in entity.cells.items():
-            cell_counts[key] += len(values)
-
-    cap = Capability(
-        entities=entities,
-        type_counts=type_counts,
-        path_counts=path_counts,
-        facet_counts=dict(facet_counts),
-        number_counts=number_counts,
-        time_counts=time_counts,
-        ref_counts=ref_counts,
-        cell_counts=cell_counts,
-        filter_summary=filters or {},
-    )
-
-    if filters:
-        cap = merge_filter_summary_into_capability(cap, filters)
-
-    return cap
+def filter_facets(filters: Json) -> dict[str, list[Json]]:
+    raw = filters.get("facets") or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, list[Json]] = {}
+    for name, rows in raw.items():
+        if isinstance(rows, list):
+            out[str(name)] = [row for row in rows if isinstance(row, dict)]
+    return out
 
 
-def entropy(counter: Counter[str]) -> float:
-    total = sum(counter.values())
-    if total <= 0:
-        return 0.0
-
-    h = 0.0
-    for count in counter.values():
-        p = count / total
-        h -= p * math.log2(p)
-
-    return h
+def row_count(row: Json) -> int:
+    return safe_int(row.get("count")) or 0
 
 
-def informative_facets(cap: Capability) -> list[str]:
-    scored: list[tuple[float, str]] = []
-    total = max(1, len(cap.entities))
+def row_value(row: Json) -> str:
+    return str(row.get("value") or row.get("name") or row.get("rel") or "")
 
-    for name, counter in cap.facet_counts.items():
-        variety = len(counter)
-        coverage = sum(counter.values()) / total
 
-        if variety <= 1:
+def discover_lanes(filters: Json, state: QueryState) -> list[Lane]:
+    """Turn advertised filter space into temporary show lanes."""
+    lanes: list[Lane] = []
+
+    for row in sorted(filter_rows(filters, "types"), key=row_count, reverse=True)[:18]:
+        value = row_value(row)
+        if not value:
             continue
+        lanes.append(Lane(
+            id=f"type:{value}",
+            label=titleize(value),
+            kind="type",
+            href=href_for_params([("type", value)]),
+            count=row_count(row),
+            reason="Advertised by data.filters.types",
+        ))
 
-        uniqueness_penalty = max(0.0, (variety / total) - 0.45)
-        score = (
-            coverage * 1.5
-            + min(variety, 12) / 12
-            + entropy(counter) / 4
-            - uniqueness_penalty
-        )
+    for row in sorted(filter_rows(filters, "paths"), key=row_count, reverse=True)[:14]:
+        value = row_value(row)
+        if not value:
+            continue
+        lanes.append(Lane(
+            id=f"path:{value}",
+            label=titleize(value),
+            kind="path",
+            href=href_for_params([("q", value)]),
+            count=row_count(row),
+            reason="Advertised by data.filters.paths",
+        ))
 
-        scored.append((score, name))
-
-    scored.sort(reverse=True)
-    return [name for _, name in scored]
-
-
-def informative_numbers(cap: Capability) -> list[str]:
-    scored: list[tuple[float, str]] = []
-
-    for name, count in cap.number_counts.items():
-        values = [
-            entity.numbers[name]
-            for entity in cap.entities
-            if name in entity.numbers
-        ]
-
-        if len(values) >= 2:
-            spread = max(values) - min(values)
-            if spread == 0:
+    for facet_name, rows in filter_facets(filters).items():
+        sorted_rows = sorted(rows, key=row_count, reverse=True)[:8]
+        if len(sorted_rows) <= 1:
+            continue
+        for row in sorted_rows:
+            value = row_value(row)
+            if not value:
                 continue
-            score = count + min(abs(spread), 1000) / 1000
-        else:
-            score = count
+            lanes.append(Lane(
+                id=f"facet:{facet_name}:{value}",
+                label=f"{compact_key(facet_name)}: {value}",
+                kind="facet",
+                href=href_for_params([("facet", f"{facet_name}:{value}")]),
+                count=row_count(row),
+                reason="Advertised by data.filters.facets",
+            ))
 
-        scored.append((score, name))
+    for row in sorted(filter_rows(filters, "refs"), key=row_count, reverse=True)[:14]:
+        rel = str(row.get("rel") or row.get("value") or row.get("name") or "")
+        if not rel:
+            continue
+        lanes.append(Lane(
+            id=f"has_ref:{rel}",
+            label=f"Linked {compact_key(rel)}",
+            kind="ref",
+            href=href_for_params([("has_ref", rel)]),
+            count=row_count(row),
+            reason="Advertised by data.filters.refs",
+        ))
 
-    scored.sort(reverse=True)
-    return [name for _, name in scored]
+    # Add lanes discovered from the actual page in case filters are sparse.
+    roots = Counter(entity.root for entity in state.entities)
+    for root, count in roots.most_common(8):
+        if count < 2:
+            continue
+        lanes.append(Lane(
+            id=f"root:{root}",
+            label=titleize(root),
+            kind="path-root",
+            href=href_for_params([("q", root)]),
+            count=count,
+            reason="Observed in canonical_path roots",
+        ))
+
+    seen: set[str] = set()
+    out: list[Lane] = []
+    for lane in sorted(lanes, key=lambda lane: (lane.count, lane.kind != "type"), reverse=True):
+        if lane.id in seen:
+            continue
+        seen.add(lane.id)
+        out.append(lane)
+    return out[:60]
 
 
-def informative_times(cap: Capability) -> list[str]:
-    scored: list[tuple[float, str]] = []
+def type_counter(entities: list[Entity]) -> Counter[str]:
+    return Counter(entity.entity_type for entity in entities)
 
-    for name, count in cap.time_counts.items():
-        values = [
-            entity.times[name]
-            for entity in cap.entities
-            if name in entity.times
-        ]
 
-        if len(values) >= 2:
-            spread = max(values) - min(values)
-            one_week_ms = 1000 * 60 * 60 * 24 * 7
-            score = count + min(spread / one_week_ms, 1.0)
-        else:
-            score = count
+def root_counter(entities: list[Entity]) -> Counter[str]:
+    return Counter(entity.root for entity in entities)
 
-        scored.append((score, name))
 
-    scored.sort(reverse=True)
-    return [name for _, name in scored]
+def facet_counter(entities: list[Entity]) -> dict[str, Counter[str]]:
+    out: dict[str, Counter[str]] = defaultdict(Counter)
+    for entity in entities:
+        for name, values in entity.facets.items():
+            for value in values:
+                out[name][value] += 1
+    return dict(out)
+
+
+def ref_counter(entities: list[Entity]) -> Counter[str]:
+    out: Counter[str] = Counter()
+    for entity in entities:
+        for rel, values in entity.refs.items():
+            out[rel] += len(values)
+    return out
+
+
+def number_counter(entities: list[Entity]) -> Counter[str]:
+    out: Counter[str] = Counter()
+    for entity in entities:
+        for key in entity.numbers:
+            out[key] += 1
+    return out
+
+
+def time_counter(entities: list[Entity]) -> Counter[str]:
+    out: Counter[str] = Counter()
+    for entity in entities:
+        for key in entity.times:
+            out[key] += 1
+    return out
 
 
 # =============================================================================
-# Content ranking: generic graph-shape rule
+# Show intelligence
 # =============================================================================
 
-def looks_like_path_text(value: str) -> bool:
-    text = str(value or "")
-    if len(text) > 120:
+def looks_like_technical_path(text: str) -> bool:
+    text = str(text or "")
+    if len(text) > 160:
         return False
     return bool(re.match(r"^[a-zA-Z0-9_:-]+(\.[a-zA-Z0-9_:-]+){2,}$", text))
 
 
-def is_reference_like(entity: Entity) -> bool:
-    et = entity.entity_type.lower()
+def is_ref_or_index(entity: Entity) -> bool:
+    kind = entity.entity_type.lower()
     path = entity.canonical_path.lower()
-
-    if "index_ref" in et:
+    if kind.endswith("_ref") or kind in {"ref", "index_ref", "topic_ref", "topic_record_ref"}:
         return True
-
-    if et.endswith("_ref") or et in {"topic_ref", "topic_record_ref"}:
+    if ".refs." in path or ".index." in path or "._meta." in path:
         return True
-
-    if ".index." in path or ".refs." in path or "._meta." in path:
-        return True
-
     return False
 
 
-def content_score(entity: Entity) -> float:
-    """
-    Generic heuristic:
-      - Rich display text beats technical IDs.
-      - Primary records beat refs/indexes.
-      - Entities with times/refs/facets/numbers are useful.
-      - Search score still matters, but should not make index refs dominate.
-    """
+def freshness_score(ms: int) -> float:
+    if not ms:
+        return 0.0
+    age = max(0, now_ms() - ms)
+    hour = 1000 * 60 * 60
+    return max(0.0, 18.0 - (age / hour))
+
+
+def signal_score(entity: Entity) -> float:
     score = 0.0
 
     if entity.score is not None:
-        score += min(entity.score, 1000) / 50
+        score += min(entity.score, 1000.0) / 40.0
 
     if entity.display and entity.display != entity.entity_id:
         score += 8
-
-    if len(entity.display) > 24:
-        score += 5
-
     if " " in entity.display:
-        score += 6
+        score += 4
+    if len(entity.display) >= 24:
+        score += 2
+    if looks_like_technical_path(entity.display):
+        score -= 9
 
-    if looks_like_path_text(entity.display):
-        score -= 8
+    score += freshness_score(entity.newest_ms)
+    score += min(entity.ref_count, 12) * 1.2
+    score += min(len(entity.facets), 8) * 0.8
+    score += min(len(entity.numbers), 8) * 1.0
+    score += min(len(entity.times), 6) * 0.9
 
-    if is_reference_like(entity):
+    if is_ref_or_index(entity):
         score -= 12
     else:
-        score += 8
-
-    if entity.times:
         score += 4
 
-    if entity.refs:
-        score += 2
-
-    if entity.facets:
-        score += 2
-
-    if entity.numbers:
-        score += 2
-
-    if entity.canonical_path.startswith("_meta") or "._meta." in entity.canonical_path:
+    if entity.root in {"_meta", "index"}:
         score -= 20
 
     return score
 
 
-def ranked_entities(entities: list[Entity]) -> list[Entity]:
-    return sorted(
-        entities,
-        key=lambda entity: (content_score(entity), entity.updated_at or 0, entity.score or 0),
-        reverse=True,
-    )
+def ranked(entities: list[Entity]) -> list[Entity]:
+    return sorted(entities, key=lambda entity: (signal_score(entity), entity.newest_ms, entity.score or 0), reverse=True)
 
 
-# =============================================================================
-# Discovered channels
-# =============================================================================
-
-@dataclass(frozen=True)
-class Channel:
-    id: str
-    title: str
-    subtitle: str
-    href: str
-    query_params: list[tuple[str, str]]
-    score: float
-
-
-def titleize_token(value: str) -> str:
-    raw = str(value or "").strip()
-    raw = raw.replace("_", " ").replace("-", " ").replace(".", " ")
-    raw = re.sub(r"\s+", " ", raw)
-    return raw.title() if raw else "Hypergraph"
-
-
-def compact_name(name: str) -> str:
-    raw = str(name or "")
-    tail = raw.rsplit(".", 1)[-1]
-    return tail.replace("_", " ").replace("-", " ").title()
-
-
-def channel_href(query_params: list[tuple[str, str]]) -> str:
-    encoded = urllib.parse.urlencode(query_params, doseq=True)
-    return f"/?{encoded}" if encoded else "/"
-
-
-def generate_channels(cap: Capability) -> list[Channel]:
-    channels: list[Channel] = []
-    total = max(1, len(cap.entities))
-
-    for entity_type, count in cap.type_counts.most_common(20):
-        channels.append(Channel(
-            id=f"type:{entity_type}",
-            title=titleize_token(entity_type),
-            subtitle=f"{count} entities",
-            href=channel_href([("type", entity_type)]),
-            query_params=[("type", entity_type)],
-            score=100 + count,
-        ))
-
-    for path, count in cap.path_counts.most_common(24):
-        if count < 2:
-            continue
-
-        penalty = 20 if count >= total else 0
-        channels.append(Channel(
-            id=f"path:{path}",
-            title=titleize_token(path),
-            subtitle=f"{count} path matches",
-            href=channel_href([("q", path)]),
-            query_params=[("q", path)],
-            score=80 + count - penalty,
-        ))
-
-    for facet_name, counter in cap.facet_counts.items():
-        if len(counter) <= 1:
-            continue
-
-        for value, count in counter.most_common(12):
-            if count < 2:
-                continue
-
-            channels.append(Channel(
-                id=f"facet:{facet_name}:{value}",
-                title=f"{compact_name(facet_name)}: {titleize_token(value)}",
-                subtitle=f"{count} entities",
-                href=channel_href([("facet", f"{facet_name}:{value}")]),
-                query_params=[("facet", f"{facet_name}:{value}")],
-                score=60 + count,
-            ))
-
-    for rel, count in cap.ref_counts.most_common(16):
-        if count < 2:
-            continue
-
-        channels.append(Channel(
-            id=f"has_ref:{rel}",
-            title=f"Linked {compact_name(rel)}",
-            subtitle=f"{count} refs",
-            href=channel_href([("has_ref", rel)]),
-            query_params=[("has_ref", rel)],
-            score=50 + count,
-        ))
-
-    for name, count in cap.number_counts.most_common(14):
-        if count < 2:
-            continue
-
-        channels.append(Channel(
-            id=f"measure:{name}",
-            title=f"Measure: {compact_name(name)}",
-            subtitle=f"{count} numeric values",
-            href=channel_href([("q", f"number:{name}")]),
-            query_params=[("q", f"number:{name}")],
-            score=40 + count,
-        ))
-
-    for name, count in cap.time_counts.most_common(14):
-        if count < 2:
-            continue
-
-        channels.append(Channel(
-            id=f"time:{name}",
-            title=f"Time: {compact_name(name)}",
-            subtitle=f"{count} timestamp values",
-            href=channel_href([("q", f"time:{name}")]),
-            query_params=[("q", f"time:{name}")],
-            score=40 + count,
-        ))
-
-    seen: set[str] = set()
-    out: list[Channel] = []
-
-    for channel in sorted(channels, key=lambda c: c.score, reverse=True):
-        if channel.id in seen:
-            continue
-        seen.add(channel.id)
-        out.append(channel)
-
-    return out[:60]
-
-
-def discover_broad_channels(relay: Relay) -> list[Channel]:
-    doc = relay.query_entities([
-        ("include", "facets,refs,numbers,times,cells"),
-        ("limit", str(DEFAULT_LIMIT)),
-        ("sort", "score"),
-    ])
-    entities = entities_from_doc(doc)
-    filters = filters_from_doc(doc)
-    cap = analyze(entities, filters)
-    return generate_channels(cap)
-
-
-def select_auto_channel(channels: list[Channel], cadence: float) -> Channel | None:
-    if not channels:
-        return None
-
-    top = channels[:16]
-    idx = int(time.time() // (cadence * 4)) % len(top)
-    return top[idx]
-
-
-def channel_json(channel: Channel) -> Json:
-    return {
-        "id": channel.id,
-        "title": channel.title,
-        "subtitle": channel.subtitle,
-        "href": channel.href,
-        "score": channel.score,
-    }
-
-
-# =============================================================================
-# Display profile
-# =============================================================================
-
-@dataclass
-class DisplayProfile:
-    title: str
-    subtitle: str
-    badge: str
-    accent: str
-    query_label: str
-    primary_facets: list[str]
-    primary_numbers: list[str]
-    primary_times: list[str]
-
-
-def stable_color(seed: str) -> str:
-    palette = [
-        "#38bdf8",
-        "#a78bfa",
-        "#f97316",
-        "#eab308",
-        "#22c55e",
-        "#ef4444",
-        "#14b8a6",
-        "#ec4899",
-        "#84cc16",
-        "#06b6d4",
-    ]
-    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
-    return palette[int(digest[:4], 16) % len(palette)]
-
-
-def initials(title: str) -> str:
-    words = [word for word in re.split(r"\s+", title.strip()) if word]
-    if not words:
-        return "HG"
-    if len(words) == 1:
-        return words[0][:2].upper()
-    return "".join(word[0] for word in words[:2]).upper()
-
-
-def infer_profile(cap: Capability, state: QueryState, params: dict[str, list[str]], query_meta: Json | None = None) -> DisplayProfile:
-    query_meta = query_meta or {}
-    presentation = query_meta.get("presentation") if isinstance(query_meta.get("presentation"), dict) else {}
-
-    if presentation.get("title"):
-        title = str(presentation["title"])
-        basis = title
-    elif params.get("source"):
-        title = "Source Query"
-        basis = state.source_url or "source"
-    elif params.get("query"):
-        title = titleize_token(str(params["query"][0]))
-        basis = str(params["query"][0])
-    elif params.get("type"):
-        title = titleize_token(str(params["type"][0]))
-        basis = str(params["type"][0])
-    elif params.get("q"):
-        title = titleize_token(str(params["q"][0]))
-        basis = str(params["q"][0])
-    elif params.get("facet"):
-        title = titleize_token(str(params["facet"][0]))
-        basis = str(params["facet"][0])
-    elif cap.type_counts:
-        dominant_type = cap.type_counts.most_common(1)[0][0]
-        title = titleize_token(dominant_type)
-        basis = dominant_type
-    elif cap.path_counts:
-        dominant_path = cap.path_counts.most_common(1)[0][0]
-        title = titleize_token(dominant_path)
-        basis = dominant_path
-    else:
-        title = "Hypergraph Cadence"
-        basis = "hypergraph"
-
-    primary_facets = informative_facets(cap)
-    primary_numbers = informative_numbers(cap)
-    primary_times = informative_times(cap)
-
-    subtitle_parts = []
-    if cap.entities:
-        subtitle_parts.append(f"{len(cap.entities)} entities")
-    if cap.type_counts:
-        subtitle_parts.append(f"{len(cap.type_counts)} types")
-    if primary_facets:
-        subtitle_parts.append(f"{len(primary_facets)} facets")
-    if primary_numbers:
-        subtitle_parts.append(f"{len(primary_numbers)} measures")
-    if primary_times:
-        subtitle_parts.append(f"{len(primary_times)} times")
-
-    return DisplayProfile(
-        title=title,
-        subtitle=" • ".join(subtitle_parts) or "No graph entities returned",
-        badge=str(presentation.get("badge") or initials(title)),
-        accent=str(presentation.get("accent") or stable_color(basis)),
-        query_label=state.label,
-        primary_facets=primary_facets,
-        primary_numbers=primary_numbers,
-        primary_times=primary_times,
-    )
-
-
-# =============================================================================
-# Frames
-# =============================================================================
-
-@dataclass
-class Frame:
-    id: str
-    title: str
-    subtitle: str
-    reason: str
-    basis: str
-    entities: list[Entity]
-
-def all_facet_pairs(entity: Entity) -> list[tuple[str, str]]:
-    out: list[tuple[str, str]] = []
-
-    for key, values in entity.facets.items():
-        for value in values:
-            out.append((key, value))
-
-    return out
-def diverse_select(entities: list[Entity], *, limit: int = 10) -> list[Entity]:
-    ranked = ranked_entities(entities)
-
+def diverse_entities(entities: list[Entity], *, limit: int = 12) -> list[Entity]:
+    ordered = ranked(entities)
     out: list[Entity] = []
     seen_types: set[str] = set()
-    seen_pairs: set[tuple[str, str]] = set()
+    seen_roots: set[str] = set()
+    seen_facets: set[tuple[str, str]] = set()
 
-    for entity in ranked:
-        novelty = False
-
-        if entity.entity_type not in seen_types:
-            novelty = True
-
-        for pair in all_facet_pairs(entity)[:8]:
-            if pair not in seen_pairs:
-                novelty = True
-
+    for entity in ordered:
+        facet_pairs = [(k, v) for k, values in entity.facets.items() for v in values[:2]]
+        novelty = (
+            entity.entity_type not in seen_types
+            or entity.root not in seen_roots
+            or any(pair not in seen_facets for pair in facet_pairs[:4])
+        )
         if novelty:
             out.append(entity)
             seen_types.add(entity.entity_type)
-            seen_pairs.update(all_facet_pairs(entity))
-
+            seen_roots.add(entity.root)
+            seen_facets.update(facet_pairs)
         if len(out) >= limit:
             return out
 
-    for entity in ranked:
+    for entity in ordered:
         if entity not in out:
             out.append(entity)
         if len(out) >= limit:
@@ -1123,689 +1094,622 @@ def diverse_select(entities: list[Entity], *, limit: int = 10) -> list[Entity]:
     return out
 
 
-def frame_overview(cap: Capability, profile: DisplayProfile) -> Frame:
-    return Frame(
-        id="overview",
-        title=profile.title,
-        subtitle=profile.subtitle,
-        reason="Computed from query results, graph filters, types, paths, facets, measures, times, and refs.",
-        basis="overview",
-        entities=diverse_select(cap.entities, limit=10),
-    )
-
-
-def frames_by_type(cap: Capability) -> list[Frame]:
-    grouped: dict[str, list[Entity]] = defaultdict(list)
-    for entity in cap.entities:
-        grouped[entity.entity_type].append(entity)
-
-    frames = []
-    for entity_type, count in cap.type_counts.most_common(10):
-        group = grouped.get(entity_type, [])
-        if not group:
-            continue
-
-        frames.append(Frame(
-            id=f"type-{slug(entity_type)}",
-            title=titleize_token(entity_type),
-            subtitle=f"{count} entities",
-            reason="The query result exposes multiple entity types; this frame isolates one type.",
-            basis=f"type:{entity_type}",
-            entities=diverse_select(group, limit=10),
-        ))
-
-    return frames
-
-
-def frames_by_path(cap: Capability) -> list[Frame]:
-    frames = []
-
-    for path, count in cap.path_counts.most_common(14):
-        if count < 2:
-            continue
-
-        group = [
-            entity for entity in cap.entities
-            if entity.canonical_path == path or entity.canonical_path.startswith(path + ".")
-        ]
-
-        if not group:
-            continue
-
-        frames.append(Frame(
-            id=f"path-{slug(path)}",
-            title=titleize_token(path),
-            subtitle=f"{count} path matches",
-            reason="The query result exposes a path cluster; this frame follows that graph branch.",
-            basis=f"path:{path}",
-            entities=diverse_select(group, limit=10),
-        ))
-
-    return frames
-
-
-def frames_by_facet(cap: Capability, profile: DisplayProfile) -> list[Frame]:
-    frames = []
-
-    for facet_name in profile.primary_facets[:10]:
-        counter = cap.facet_counts.get(facet_name)
-        if not counter:
-            continue
-
-        grouped: dict[str, list[Entity]] = defaultdict(list)
-        for entity in cap.entities:
-            for value in entity.facets.get(facet_name, []):
-                grouped[value].append(entity)
-
-        for value, count in counter.most_common(8):
-            group = grouped.get(value, [])
-            if not group:
-                continue
-
-            frames.append(Frame(
-                id=f"facet-{slug(facet_name)}-{slug(value)}",
-                title=titleize_token(value),
-                subtitle=f"{compact_name(facet_name)} • {count} entities",
-                reason=f"The result advertises facet {facet_name}={value}; this frame is computed from that band.",
-                basis=f"facet:{facet_name}:{value}",
-                entities=diverse_select(group, limit=10),
-            ))
-
-    return frames
-
-
-def frames_by_number(cap: Capability, profile: DisplayProfile) -> list[Frame]:
-    frames = []
-
-    for number_name in profile.primary_numbers[:8]:
-        group = [
-            entity for entity in cap.entities
-            if number_name in entity.numbers
-        ]
-
-        if len(group) < 2:
-            continue
-
-        frames.append(Frame(
-            id=f"number-{slug(number_name)}-high",
-            title=f"High {compact_name(number_name)}",
-            subtitle="numeric leaderboard",
-            reason=f"The result exposes numeric field {number_name}; this frame ranks high values.",
-            basis=f"number:{number_name}:desc",
-            entities=sorted(group, key=lambda e: e.numbers[number_name], reverse=True)[:10],
-        ))
-
-        frames.append(Frame(
-            id=f"number-{slug(number_name)}-low",
-            title=f"Low {compact_name(number_name)}",
-            subtitle="numeric leaderboard",
-            reason=f"The result exposes numeric field {number_name}; this frame ranks low values.",
-            basis=f"number:{number_name}:asc",
-            entities=sorted(group, key=lambda e: e.numbers[number_name])[:10],
-        ))
-
-    return frames
-
-
-def frames_by_time(cap: Capability, profile: DisplayProfile) -> list[Frame]:
-    frames = []
-
-    for time_name in profile.primary_times[:8]:
-        group = [
-            entity for entity in cap.entities
-            if time_name in entity.times
-        ]
-
-        if len(group) < 2:
-            continue
-
-        frames.append(Frame(
-            id=f"time-{slug(time_name)}-recent",
-            title=f"Latest {compact_name(time_name)}",
-            subtitle="recency page",
-            reason=f"The result exposes time field {time_name}; this frame surfaces recent entities.",
-            basis=f"time:{time_name}:desc",
-            entities=sorted(group, key=lambda e: e.times[time_name], reverse=True)[:10],
-        ))
-
-        frames.append(Frame(
-            id=f"time-{slug(time_name)}-oldest",
-            title=f"Oldest {compact_name(time_name)}",
-            subtitle="archive page",
-            reason=f"The result exposes time field {time_name}; this frame surfaces older entities.",
-            basis=f"time:{time_name}:asc",
-            entities=sorted(group, key=lambda e: e.times[time_name])[:10],
-        ))
-
-    return frames
-
-
-def frames_by_ref(cap: Capability) -> list[Frame]:
-    frames = []
-
-    for rel, count in cap.ref_counts.most_common(12):
-        group = [
-            entity for entity in cap.entities
-            if rel in entity.refs
-        ]
-
-        if not group:
-            continue
-
-        frames.append(Frame(
-            id=f"ref-{slug(rel)}",
-            title=f"Linked {compact_name(rel)}",
-            subtitle=f"{count} refs",
-            reason=f"The result advertises refs named {rel}; this frame surfaces connected entities.",
-            basis=f"ref:{rel}",
-            entities=diverse_select(group, limit=10),
-        ))
-
-    return frames
-
-
-def frames_indexes_and_refs(cap: Capability) -> list[Frame]:
-    ref_like = [entity for entity in cap.entities if is_reference_like(entity)]
-
-    if not ref_like:
-        return []
-
-    return [
-        Frame(
-            id="references-indexes",
-            title="Refs And Indexes",
-            subtitle=f"{len(ref_like)} reference-like entities",
-            reason="Reference and index nodes are navigational affordances; this frame keeps them available without letting them dominate content.",
-            basis="shape:refs_indexes",
-            entities=diverse_select(ref_like, limit=10),
-        )
-    ]
-
-
-def infer_frames(cap: Capability, profile: DisplayProfile) -> list[Frame]:
-    if not cap.entities:
-        return [
-            Frame(
-                id="empty",
-                title="No Graph Data",
-                subtitle="No entities returned",
-                reason="The relay returned no entities for the current query.",
-                basis="empty",
-                entities=[],
-            )
-        ]
-
-    frames: list[Frame] = []
-    frames.append(frame_overview(cap, profile))
-    frames.extend(frames_by_type(cap))
-    frames.extend(frames_by_path(cap))
-    frames.extend(frames_by_facet(cap, profile))
-    frames.extend(frames_by_number(cap, profile))
-    frames.extend(frames_by_time(cap, profile))
-    frames.extend(frames_by_ref(cap))
-    frames.extend(frames_indexes_and_refs(cap))
-
-    seen: set[str] = set()
-    out: list[Frame] = []
-
-    for frame in frames:
-        if frame.id in seen:
-            continue
-        seen.add(frame.id)
-        out.append(frame)
-
-    return out[:50]
-
-
-# =============================================================================
-# Generic render helpers
-# =============================================================================
-
-def esc(value: Any) -> str:
-    return html.escape(str(value if value is not None else ""))
-
-
-def time_label(ms: int | None) -> str:
-    if not ms:
-        return ""
-    try:
-        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    except Exception:
-        return ""
-
-
-def newest_time(entity: Entity) -> int | None:
-    if not entity.times:
-        return entity.updated_at
-
-    preferred = [
-        "activity_latest_at",
-        "updated_at",
-        "received_at",
-        "created_at",
-        "fetched_at",
-        "published_at",
-        "observed_at",
-        "start_time",
-    ]
-
-    for name in preferred:
-        if name in entity.times:
-            return entity.times[name]
-
-    return max(entity.times.values())
-
-
-def glyph_for(entity: Entity) -> str:
-    haystack = " ".join([
-        entity.entity_type,
-        entity.canonical_path,
-        entity.display,
-        " ".join(v for values in entity.facets.values() for v in values),
-    ]).lower()
-
-    if any(x in haystack for x in ["weather", "temperature", "rain", "cloud", "forecast"]):
-        if "storm" in haystack or "thunder" in haystack:
-            return "⛈️"
-        if "rain" in haystack:
-            return "🌧️"
-        if "snow" in haystack:
-            return "❄️"
-        if "cloud" in haystack or "overcast" in haystack:
-            return "☁️"
-        if "clear" in haystack or "sun" in haystack:
-            return "☀️"
-        return "🌤️"
-
-    if any(x in haystack for x in ["sports", "game", "team", "league", "score"]):
-        if "live" in haystack or "in_progress" in haystack:
-            return "🔴"
-        if "future" in haystack or "scheduled" in haystack:
-            return "🗓️"
-        if "past" in haystack or "final" in haystack or "post" in haystack:
-            return "🏁"
-        return "🏟️"
-
-    if any(x in haystack for x in ["news", "article", "headline", "published"]):
-        return "📰"
-
-    if any(x in haystack for x in ["atproto", "bsky", "jetstream", "post", "topic"]):
-        if "topic" in haystack or "tag" in haystack:
-            return "#"
-        return "🗨️"
-
-    if any(x in haystack for x in ["finance", "market", "asset", "price"]):
-        return "💹"
-
-    if any(x in haystack for x in ["earthquake", "quake", "magnitude", "seismic"]):
-        return "⛔"
-
-    if any(x in haystack for x in ["location", "geo", "city", "country"]):
-        return "📍"
-
-    if is_reference_like(entity):
-        return "↗"
-
-    return "◆"
-
-
-def format_number(value: float) -> str:
-    if abs(value) >= 1000:
-        return f"{value:,.0f}"
-    if abs(value) >= 100:
-        return f"{value:.0f}"
-    if abs(value) >= 10:
-        return f"{value:.1f}"
-    return f"{value:.2f}"
-
-
 def metric_for(entity: Entity) -> str:
-    lower_numbers = {key.lower(): (key, value) for key, value in entity.numbers.items()}
+    # Score pair, if present.
+    lower = {key.lower(): key for key in entity.numbers}
+    home = lower.get("home_score") or next((orig for key, orig in lower.items() if key.endswith("home_score")), None)
+    away = lower.get("away_score") or next((orig for key, orig in lower.items() if key.endswith("away_score")), None)
+    if home and away:
+        return f"{int(entity.numbers.get(away, 0))} - {int(entity.numbers.get(home, 0))}"
 
-    home_key = next(
-        (orig for key, (orig, _) in lower_numbers.items() if key.endswith("home_score") or key == "home_score"),
-        None,
-    )
-    away_key = next(
-        (orig for key, (orig, _) in lower_numbers.items() if key.endswith("away_score") or key == "away_score"),
-        None,
-    )
-
-    if home_key and away_key:
-        return f"{int(entity.numbers.get(away_key, 0))} - {int(entity.numbers.get(home_key, 0))}"
-
-    preferred_substrings = [
+    preferred = (
+        "magnitude",
         "temperature",
         "temp",
         "price",
+        "last_price",
         "score",
-        "count",
-        "magnitude",
         "population",
-        "rank",
+        "count",
+        "location_count",
+        "depth",
+        "leader_count",
+        "byte_length",
         "value",
-        "time_us",
-    ]
-
+    )
     ignored = {"lat", "lon", "lng", "latitude", "longitude"}
 
-    for needle in preferred_substrings:
+    for needle in preferred:
         for key, value in entity.numbers.items():
             key_l = key.lower()
-            if any(key_l == x or key_l.endswith("." + x) for x in ignored):
+            if key_l in ignored:
                 continue
             if needle in key_l:
-                return f"{compact_name(key)} {format_number(value)}"
+                return f"{compact_key(key)} {format_number(value)}"
 
     for key, value in entity.numbers.items():
         key_l = key.lower()
-        if any(key_l == x or key_l.endswith("." + x) for x in ignored):
+        if key_l in ignored:
             continue
-        return f"{compact_name(key)} {format_number(value)}"
+        return f"{compact_key(key)} {format_number(value)}"
 
-    when = newest_time(entity)
-    if when:
-        return time_label(when)
+    if entity.newest_ms:
+        return time_ago(entity.newest_ms)
+
+    if entity.ref_count:
+        return f"{entity.ref_count} refs"
 
     return ""
 
 
-def dedup(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
+def chip_values(entity: Entity, limit: int = 7) -> list[str]:
+    chips: list[str] = []
 
-    for value in values:
-        key = value.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(value)
-
-    return out
-
-
-def secondary_for(entity: Entity) -> str:
-    parts: list[str] = []
-
-    priority_keys = [
+    priority = (
         "source",
         "region",
+        "country_code",
+        "status",
+        "kind",
         "league",
         "sport",
-        "status",
-        "score_bug_mode",
-        "kind",
-        "index_name",
-        "index_value",
-        "entity_type",
         "published_day",
-        "country_code",
         "condition",
-    ]
+        "collection",
+        "record_type",
+    )
 
-    for key in priority_keys:
+    for key in priority:
         for value in entity.facets.get(key, []):
-            if value and len(value) <= 40:
-                parts.append(value)
+            chips.append(f"{compact_key(key)}: {value}")
+            if len(chips) >= limit:
+                return dedup(chips)
 
     for key, values in entity.facets.items():
-        for value in values:
-            if value and len(value) <= 40:
-                parts.append(value)
-            if len(parts) >= 4:
-                return " • ".join(dedup(parts)[:3])
+        for value in values[:2]:
+            if len(str(value)) <= 48:
+                chips.append(f"{compact_key(key)}: {value}")
+            if len(chips) >= limit:
+                return dedup(chips)
 
+    for key, value in list(entity.numbers.items())[:3]:
+        chips.append(f"{compact_key(key)}: {format_number(value)}")
+        if len(chips) >= limit:
+            return dedup(chips)
+
+    if entity.ref_count:
+        chips.append(f"{entity.ref_count} refs")
+
+    if entity.newest_ms:
+        chips.append(time_ago(entity.newest_ms))
+
+    return dedup(chips)[:limit]
+
+
+def subtitle_for(entity: Entity) -> str:
+    parts: list[str] = []
     if entity.entity_type:
-        parts.append(entity.entity_type)
-
-    return " • ".join(dedup(parts)[:3])
-
-
-def frame_chyron(frame: Frame) -> str:
-    if not frame.entities:
-        return "NO GRAPH DATA AVAILABLE"
-
-    lead = ranked_entities(frame.entities)[0]
-    parts = [frame.title.upper(), lead.display.upper()]
-
-    metric = metric_for(lead)
-    secondary = secondary_for(lead)
-
-    if metric:
-        parts.append(metric.upper())
-
-    if secondary:
-        parts.append(secondary.upper())
-
-    return " • ".join(parts[:4])
+        parts.append(titleize(entity.entity_type))
+    if entity.root and entity.root != entity.entity_type:
+        parts.append(titleize(entity.root))
+    if entity.ref_count:
+        parts.append(f"{entity.ref_count} refs")
+    if entity.newest_ms:
+        parts.append(time_ago(entity.newest_ms))
+    return " • ".join(dedup(parts)[:4])
 
 
-def frame_ticker(frame: Frame) -> str:
-    if not frame.entities:
-        return "No graph entities available."
+def shape_icon(entity: Entity) -> str:
+    if entity.ref_count >= 3:
+        return "↗"
+    if entity.numbers and entity.times:
+        return "↯"
+    if entity.numbers:
+        return "#"
+    if entity.times:
+        return "◷"
+    if entity.facets:
+        return "◈"
+    if is_ref_or_index(entity):
+        return "⇢"
+    return "◆"
 
-    segments: list[str] = []
 
-    for entity in ranked_entities(frame.entities):
-        seg = f"{glyph_for(entity)} {entity.display.upper()}"
+def reason_for(entity: Entity) -> str:
+    reasons: list[str] = []
+    if entity.score is not None:
+        reasons.append(f"search score {format_number(entity.score)}")
+    if entity.newest_ms:
+        reasons.append(f"fresh {time_ago(entity.newest_ms)}")
+    if entity.ref_count:
+        reasons.append(f"{entity.ref_count} graph refs")
+    if entity.numbers:
+        reasons.append(f"measures: {', '.join(list(entity.numbers)[:3])}")
+    if entity.times:
+        reasons.append(f"times: {', '.join(list(entity.times)[:3])}")
+    if entity.facets:
+        reasons.append(f"facets: {', '.join(list(entity.facets)[:3])}")
+    return " • ".join(reasons) or "selected from embedded hypermedia result"
 
+
+def build_segments(state: QueryState, lanes: list[Lane], record_detail: RecordDetail | None) -> list[Segment]:
+    entities = state.entities
+    segments: list[Segment] = []
+
+    if not entities:
+        return [Segment(
+            id="empty",
+            label="NO SIGNAL",
+            title="No Live State Returned",
+            dek="The hypergraph returned no embedded entities for this query.",
+            why="The show follows advertised state; no state was returned for the current request.",
+            mode="empty",
+            entities=[],
+        )]
+
+    types = type_counter(entities)
+    roots = root_counter(entities)
+    refs = ref_counter(entities)
+    numbers = number_counter(entities)
+    times = time_counter(entities)
+    facets = facet_counter(entities)
+
+    segments.append(Segment(
+        id="earth-open",
+        label="EARTH OPEN",
+        title="Earth Is Live",
+        dek="A live sweep of the strongest state the graph is advertising right now.",
+        why="Built from embedded results plus discovered types, roots, facets, refs, measures, and times.",
+        mode="overview",
+        entities=diverse_entities(entities, limit=12),
+        stats={
+            "entities": len(entities),
+            "types": len(types),
+            "roots": len(roots),
+            "lanes": len(lanes),
+        },
+    ))
+
+    segments.append(Segment(
+        id="hot-nodes",
+        label="HOT NODES",
+        title="Highest Signal Nodes",
+        dek="The entities with the strongest mix of relevance, freshness, refs, measures, and readable display.",
+        why="Ranked by a generic signal score; no domain-specific channel logic is used.",
+        mode="ranked",
+        entities=ranked(entities)[:12],
+        stats={"scoring": "score + freshness + refs + measures + times + facets"},
+    ))
+
+    fresh = [entity for entity in entities if entity.newest_ms]
+    if fresh:
+        segments.append(Segment(
+            id="fresh-state",
+            label="STATE CHANGE",
+            title="Freshest State On The Tape",
+            dek="The newest timestamped entities in the current hypermedia state.",
+            why="Generated only because entities expose time fields or updated_at values.",
+            mode="time",
+            entities=sorted(fresh, key=lambda entity: entity.newest_ms, reverse=True)[:12],
+            metric_label="freshness",
+        ))
+
+    ref_heavy = [entity for entity in entities if entity.ref_count]
+    if ref_heavy:
+        segments.append(Segment(
+            id="follow-the-refs",
+            label="FOLLOW THE REFS",
+            title="Most Connected State",
+            dek="The nodes with the most graph relationships available to follow.",
+            why="Generated from refs advertised by the query result, not from hard-coded domains.",
+            mode="refs",
+            entities=sorted(ref_heavy, key=lambda entity: (entity.ref_count, signal_score(entity)), reverse=True)[:12],
+            metric_label="refs",
+            stats={"top_refs": dict(refs.most_common(8))},
+        ))
+
+    # Type clusters discovered from returned entities.
+    for entity_type, count in types.most_common(10):
+        group = [entity for entity in entities if entity.entity_type == entity_type]
+        if len(group) < 2:
+            continue
+        segments.append(Segment(
+            id=f"type-{slug(entity_type)}",
+            label="TYPE LANE",
+            title=titleize(entity_type),
+            dek=f"{count} entities in this discovered type lane.",
+            why="Generated from entity_type values returned by the graph.",
+            mode="cluster",
+            entities=diverse_entities(group, limit=12),
+            stats={"type": entity_type, "count": count},
+        ))
+
+    # Root/path clusters discovered from canonical paths.
+    for root, count in roots.most_common(10):
+        group = [entity for entity in entities if entity.root == root]
+        if len(group) < 2:
+            continue
+        segments.append(Segment(
+            id=f"root-{slug(root)}",
+            label="PATH LANE",
+            title=titleize(root),
+            dek=f"{count} entities under this canonical path root.",
+            why="Generated from canonical_path structure exposed by the graph.",
+            mode="cluster",
+            entities=diverse_entities(group, limit=12),
+            stats={"root": root, "count": count},
+        ))
+
+    # Facet clusters with variety.
+    facet_candidates: list[tuple[int, str, str, list[Entity]]] = []
+    for facet_name, counter in facets.items():
+        if len(counter) <= 1:
+            continue
+        for value, count in counter.most_common(6):
+            group = [entity for entity in entities if value in entity.facets.get(facet_name, [])]
+            if len(group) >= 2:
+                facet_candidates.append((count, facet_name, value, group))
+
+    for count, facet_name, value, group in sorted(facet_candidates, reverse=True)[:14]:
+        segments.append(Segment(
+            id=f"facet-{slug(facet_name)}-{slug(value)}",
+            label="FACET LANE",
+            title=f"{compact_key(facet_name)}: {value}",
+            dek=f"{count} entities share this advertised facet value.",
+            why="Generated from facet values returned in entity payloads and/or data.filters.facets.",
+            mode="facet",
+            entities=diverse_entities(group, limit=12),
+            stats={"facet": facet_name, "value": value, "count": count},
+        ))
+
+    # Numeric leaderboards discovered from measures.
+    for number_name, count in numbers.most_common(8):
+        group = [entity for entity in entities if number_name in entity.numbers]
+        values = [entity.numbers[number_name] for entity in group]
+        if len(values) < 2 or max(values) == min(values):
+            continue
+        high = sorted(group, key=lambda entity: entity.numbers[number_name], reverse=True)[:12]
+        segments.append(Segment(
+            id=f"measure-high-{slug(number_name)}",
+            label="MEASURE TAPE",
+            title=f"High {compact_key(number_name)}",
+            dek="A leaderboard generated from a numeric field the graph exposed.",
+            why=f"Generated from discovered numeric measure `{number_name}`.",
+            mode="measure",
+            entities=high,
+            metric_label=number_name,
+            stats={"measure": number_name, "count": count},
+        ))
+
+    # Time lanes discovered from timestamps.
+    for time_name, count in times.most_common(8):
+        group = [entity for entity in entities if time_name in entity.times]
+        if len(group) < 2:
+            continue
+        newest = sorted(group, key=lambda entity: entity.times[time_name], reverse=True)[:12]
+        segments.append(Segment(
+            id=f"time-{slug(time_name)}",
+            label="TIME TAPE",
+            title=f"Latest {compact_key(time_name)}",
+            dek="A recency lane generated from a timestamp field the graph exposed.",
+            why=f"Generated from discovered time field `{time_name}`.",
+            mode="time",
+            entities=newest,
+            metric_label=time_name,
+            stats={"time_field": time_name, "count": count},
+        ))
+
+    # Record detail segment from an advertised record/self link.
+    if record_detail:
+        segments.insert(1, Segment(
+            id="record-open",
+            label="RECORD OPEN",
+            title=record_detail.title or "Opened Record",
+            dek=record_detail.summary or "The show followed an advertised record/self link into detail state.",
+            why="Generated by opening the first high-signal embedded result with an advertised record/self link.",
+            mode="record",
+            entities=[],
+            stats={
+                "kind": record_detail.kind,
+                "path": record_detail.path,
+                "links": len(record_detail.links),
+                "actions": len(record_detail.actions),
+            },
+        ))
+
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    out: list[Segment] = []
+    for segment in segments:
+        if segment.id in seen:
+            continue
+        seen.add(segment.id)
+        out.append(segment)
+
+    return out[:80]
+
+
+# =============================================================================
+# Record following
+# =============================================================================
+
+def advertised_record_href(entity: Entity) -> str | None:
+    for rel in ("record", "self", "item", "canonical", "target"):
+        href = entity.links.get(rel)
+        if href:
+            return href
+    return None
+
+
+def open_record_detail(agent: HypermediaAgent, entities: list[Entity]) -> RecordDetail | None:
+    for entity in ranked(entities)[:16]:
+        href = advertised_record_href(entity)
+        if not href:
+            continue
+        try:
+            doc = agent.get_json(href)
+        except Exception:
+            continue
+
+        state = doc.get("_state") if isinstance(doc.get("_state"), dict) else {}
+        data = doc.get("data") if isinstance(doc.get("data"), dict) else {}
+        title = str(
+            data.get("display")
+            or data.get("title")
+            or data.get("name")
+            or state.get("summary")
+            or entity.display
+            or "Opened Record"
+        )
+        summary = str(
+            state.get("summary")
+            or data.get("summary")
+            or data.get("description")
+            or entity.text
+            or "Advertised record opened through hypermedia link."
+        )
+        kind = str(state.get("kind") or data.get("kind") or data.get("entity_type") or entity.entity_type)
+        path = str(state.get("path") or data.get("canonical_path") or data.get("path") or entity.canonical_path)
+
+        return RecordDetail(
+            href=href,
+            title=title,
+            summary=summary,
+            kind=kind,
+            path=path,
+            links=agent.links(doc),
+            actions=agent.actions(doc),
+            raw=doc,
+        )
+    return None
+
+
+# =============================================================================
+# Rendering payload
+# =============================================================================
+
+def entity_card(entity: Entity) -> Json:
+    href = advertised_record_href(entity)
+    return {
+        "icon": shape_icon(entity),
+        "title": entity.display,
+        "subtitle": subtitle_for(entity),
+        "type": entity.entity_type,
+        "path": entity.canonical_path or entity.entity_id,
+        "root": entity.root,
+        "metric": metric_for(entity),
+        "chips": chip_values(entity),
+        "reason": reason_for(entity),
+        "href": href,
+        "score": signal_score(entity),
+        "refs": entity.ref_count,
+        "fresh": time_ago(entity.newest_ms) if entity.newest_ms else "",
+    }
+
+
+def segment_payload(segment: Segment) -> Json:
+    return {
+        "id": segment.id,
+        "label": segment.label,
+        "title": segment.title,
+        "dek": segment.dek,
+        "why": segment.why,
+        "mode": segment.mode,
+        "metric_label": segment.metric_label,
+        "stats": segment.stats,
+        "cards": [entity_card(entity) for entity in segment.entities[:12]],
+        "count": len(segment.entities),
+    }
+
+
+def lane_payload(lane: Lane) -> Json:
+    return {
+        "id": lane.id,
+        "label": lane.label,
+        "kind": lane.kind,
+        "href": lane.href,
+        "count": lane.count,
+        "reason": lane.reason,
+    }
+
+
+def discovery_payload(discovery: Discovery) -> Json:
+    return {
+        "root_links": discovery.root_links,
+        "query_links": discovery.query_links,
+        "root_actions": sorted(discovery.root_actions.keys()),
+        "query_actions": sorted(discovery.query_actions.keys()),
+        "search_action": {
+            "method": discovery.search_action.get("method"),
+            "href": discovery.search_action.get("href"),
+            "fields": discovery.search_action.get("fields") or [],
+            "title": discovery.search_action.get("title"),
+        },
+    }
+
+
+def active_index(params: dict[str, list[str]], count: int) -> int:
+    if count <= 0:
+        return 0
+    raw = (params.get("segment") or params.get("frame") or [None])[0]
+    if raw is not None:
+        try:
+            return int(raw) % count
+        except Exception:
+            pass
+    cadence = float((params.get("cadence") or [DEFAULT_CADENCE_SECONDS])[0])
+    cadence = max(2.0, cadence)
+    return int(time.time() // cadence) % count
+
+
+def tape_text(segment: Segment, lanes: list[Lane], state: QueryState) -> str:
+    parts: list[str] = []
+    for entity in segment.entities[:16]:
         metric = metric_for(entity)
-        secondary = secondary_for(entity)
-
+        chunk = f"{shape_icon(entity)} {entity.display.upper()}"
         if metric:
-            seg += f": {metric}"
+            chunk += f" — {metric}"
+        if entity.ref_count:
+            chunk += f" — {entity.ref_count} REFS"
+        parts.append(chunk)
 
-        if secondary:
-            seg += f" ({secondary})"
+    if not parts:
+        for lane in lanes[:12]:
+            parts.append(f"{lane.kind.upper()} LANE: {lane.label.upper()} ({lane.count})")
 
-        segments.append(seg)
+    if not parts:
+        parts.append(f"EARTH.APP FOLLOWING HYPERMEDIA STATE — {state.label.upper()}")
 
-    return "   •••   ".join(segments[:16])
+    return "   •••   ".join(parts)
 
 
-def frame_rundown(active: Frame, frames: list[Frame]) -> list[Json]:
-    return [
+def lower_third(segment: Segment, state: QueryState) -> str:
+    bits = [segment.label, segment.title]
+    if state.label:
+        bits.append(state.label)
+    if segment.entities:
+        lead = segment.entities[0]
+        metric = metric_for(lead)
+        if metric:
+            bits.append(metric)
+    return " • ".join(bits[:4]).upper()
+
+
+def trail_payload(discovery: Discovery, state: QueryState, record_detail: RecordDetail | None) -> list[Json]:
+    trail = [
         {
-            "id": frame.id,
-            "title": frame.title,
-            "subtitle": frame.subtitle,
-            "basis": frame.basis,
-            "active": frame.id == active.id,
-            "count": len(frame.entities),
-        }
-        for frame in frames
+            "label": "Root",
+            "kind": "_links",
+            "detail": f"{len(discovery.root_links)} links / {len(discovery.root_actions)} actions",
+        },
+        {
+            "label": "Query Home",
+            "kind": "_actions",
+            "detail": f"{len(discovery.query_links)} links / {len(discovery.query_actions)} actions",
+        },
+        {
+            "label": "Search Action",
+            "kind": str(discovery.search_action.get("method") or "GET"),
+            "detail": str(discovery.search_action.get("href") or "/api/query/entities"),
+        },
+        {
+            "label": "Result State",
+            "kind": "_embedded",
+            "detail": f"{len(state.entities)} entities / total {state.total if state.total is not None else 'unknown'}",
+        },
     ]
+    if state.next_href:
+        trail.append({
+            "label": "Next Page",
+            "kind": "_links.next",
+            "detail": state.next_href,
+        })
+    if record_detail:
+        trail.append({
+            "label": "Record Open",
+            "kind": record_detail.kind,
+            "detail": record_detail.path,
+        })
+    return trail
 
 
-def cards_html(frame: Frame) -> str:
-    if not frame.entities:
-        return """
-        <section class="card-grid">
-          <article class="card">
-            <div class="symbol">∅</div>
-            <div class="card-main">
-              <div class="card-kicker">empty</div>
-              <div class="card-title">No entities found</div>
-              <div class="card-sub">The relay returned no matching records.</div>
-            </div>
-          </article>
-        </section>
-        """
-
-    cards: list[str] = []
-
-    for entity in ranked_entities(frame.entities)[:12]:
-        chips: list[str] = []
-
-        for key, values in list(entity.facets.items())[:7]:
-            for value in values[:2]:
-                chips.append(f"<span>{esc(compact_name(key))}: {esc(value)}</span>")
-                if len(chips) >= 8:
-                    break
-            if len(chips) >= 8:
-                break
-
-        for key, value in list(entity.numbers.items())[:4]:
-            chips.append(f"<span>{esc(compact_name(key))}: {esc(format_number(value))}</span>")
-            if len(chips) >= 10:
-                break
-
-        refs_count = sum(len(values) for values in entity.refs.values())
-        if refs_count:
-            chips.append(f"<span>{refs_count} refs</span>")
-
-        when = newest_time(entity)
-        if when:
-            chips.append(f"<span>{esc(time_label(when))}</span>")
-
-        if entity.matched_by and entity.matched_by.get("terms"):
-            terms = entity.matched_by.get("terms") or []
-            if terms:
-                chips.append(f"<span>matched {esc(str(terms[0]))}</span>")
-
-        cards.append(f"""
-          <article class="card">
-            <div class="symbol">{esc(glyph_for(entity))}</div>
-            <div class="card-main">
-              <div class="card-kicker">{esc(entity.entity_type)}</div>
-              <div class="card-title">{esc(entity.display)}</div>
-              <div class="card-sub">{esc(secondary_for(entity))}</div>
-              <div class="card-path">{esc(entity.canonical_path)}</div>
-            </div>
-            <div class="card-metric">{esc(metric_for(entity))}</div>
-            <div class="chips">{''.join(chips)}</div>
-          </article>
-        """)
-
-    return f"<section class='card-grid'>{''.join(cards)}</section>"
-
-
-# =============================================================================
-# Payload computation
-# =============================================================================
-
-def compute_active_state(relay: Relay, params: dict[str, list[str]], cadence: float) -> tuple[QueryState, Json, list[Channel], Channel | None]:
-    """
-    If query/source params are present, use them.
-
-    If the URL has no user query, auto-select a discovered channel from the broad graph.
-    """
-    broad_doc = relay.query_entities([
-        ("include", "facets,refs,numbers,times,cells"),
-        ("limit", str(DEFAULT_LIMIT)),
-        ("sort", "score"),
-    ])
-    broad_entities = entities_from_doc(broad_doc)
-    broad_filters = filters_from_doc(broad_doc)
-    broad_cap = analyze(broad_entities, broad_filters)
-    channels = generate_channels(broad_cap)
-
-    selected_channel: Channel | None = None
-
-    if not has_user_query(params):
-        selected_channel = select_auto_channel(channels, cadence)
-        if selected_channel:
-            selected_params = params_from_pairs(selected_channel.query_params)
-            for key in CONTROL_PARAMS:
-                if key in params and key not in {"source", "query"}:
-                    selected_params[key] = params[key]
-            params = selected_params
-
-    state, query_meta = load_query_state(relay, params)
-
-    return state, query_meta, channels, selected_channel
-
-
-def compute_payload(params: dict[str, list[str]]) -> Json:
-    relay = Relay(HYPER_URL)
-    cadence = cadence_from_params(params)
-
-    state, query_meta, channels, selected_channel = compute_active_state(relay, params, cadence)
-
-    cap = analyze(state.entities, state.filters)
-    profile = infer_profile(cap, state, params, query_meta)
-    frames = infer_frames(cap, profile)
-
-    frame_raw = (params.get("frame") or [None])[0]
-
-    if frame_raw is not None:
-        frame_index = int(frame_raw)
-    else:
-        frame_index = int(time.time() // cadence)
-
-    frame = frames[frame_index % len(frames)]
+def compute_show(params: dict[str, list[str]]) -> Json:
+    agent = HypermediaAgent(HYPER_URL)
+    discovery = agent.discover()
+    state = load_query_state(agent, discovery, params)
+    lanes = discover_lanes(state.filters, state)
+    record_detail = open_record_detail(agent, state.entities)
+    segments = build_segments(state, lanes, record_detail)
+    idx = active_index(params, len(segments))
+    segment = segments[idx]
 
     return {
         "ok": True,
+        "brand": "EARTH.APP",
+        "tagline": "LIVE HYPERMEDIA SHOW",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "relay": HYPER_URL,
-        "cadence_seconds": cadence,
-        "auto_channel": channel_json(selected_channel) if selected_channel else None,
         "query": {
             "label": state.label,
-            "source_url": state.source_url,
-            "request_pairs": state.request_pairs,
-            "has_user_query": has_user_query(params),
-            "query_meta": query_meta,
+            "params": state.request_params,
+            "total": state.total,
+            "pages_loaded": len(state.docs),
+            "next_href": state.next_href,
         },
-        "profile": {
-            "title": profile.title,
-            "subtitle": profile.subtitle,
-            "badge": profile.badge,
-            "accent": profile.accent,
-            "primary_facets": profile.primary_facets,
-            "primary_numbers": profile.primary_numbers,
-            "primary_times": profile.primary_times,
+        "discovery": discovery_payload(discovery),
+        "affordances": {
+            "lanes": [lane_payload(lane) for lane in lanes],
+            "types": [row for row in filter_rows(state.filters, "types")[:16]],
+            "paths": [row for row in filter_rows(state.filters, "paths")[:16]],
+            "refs": [row for row in filter_rows(state.filters, "refs")[:16]],
+            "measures": [row for row in filter_rows(state.filters, "measures")[:16]],
+            "times": [row for row in filter_rows(state.filters, "times")[:16]],
         },
-        "channels": [channel_json(channel) for channel in channels],
-        "capabilities": {
-            "entity_count": len(state.entities),
-            "types": dict(cap.type_counts.most_common(16)),
-            "paths": dict(cap.path_counts.most_common(16)),
-            "facets": {
-                key: dict(counter.most_common(10))
-                for key, counter in list(cap.facet_counts.items())[:16]
-            },
-            "numbers": dict(cap.number_counts.most_common(16)),
-            "times": dict(cap.time_counts.most_common(16)),
-            "refs": dict(cap.ref_counts.most_common(16)),
-        },
-        "frame_index": frame_index,
-        "frame_count": len(frames),
-        "frame": {
-            "id": frame.id,
-            "title": frame.title,
-            "subtitle": frame.subtitle,
-            "reason": frame.reason,
-            "basis": frame.basis,
-            "count": len(frame.entities),
-        },
-        "tickerText": frame_ticker(frame),
-        "chyronText": frame_chyron(frame),
-        "rundownStories": frame_rundown(frame, frames),
-        "cardsHtml": cards_html(frame),
+        "trail": trail_payload(discovery, state, record_detail),
+        "segments": [
+            {
+                "id": s.id,
+                "label": s.label,
+                "title": s.title,
+                "dek": s.dek,
+                "mode": s.mode,
+                "count": len(s.entities),
+                "active": s.id == segment.id,
+            }
+            for s in segments
+        ],
+        "active_index": idx,
+        "active_segment": segment_payload(segment),
+        "lower_third": lower_third(segment, state),
+        "tape": tape_text(segment, lanes, state),
     }
 
 
 # =============================================================================
-# Browser runtime
+# HTML/CSS/JS front end
 # =============================================================================
 
 INDEX_HTML = r"""
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Generic Hypergraph Display</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8" />
+  <title>Earth.app — Live Hypermedia Show</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
-      --accent: #a78bfa;
       --bg: #020617;
-      --panel: rgba(15, 23, 42, 0.76);
-      --border: rgba(148, 163, 184, 0.22);
+      --panel: rgba(15, 23, 42, 0.82);
+      --panel2: rgba(2, 6, 23, 0.72);
+      --line: rgba(148, 163, 184, 0.23);
       --text: #f8fafc;
       --muted: #94a3b8;
+      --hot: #f97316;
+      --hot2: #facc15;
+      --blue: #38bdf8;
+      --green: #22c55e;
+      --purple: #a78bfa;
+      --danger: #ef4444;
     }
 
     * { box-sizing: border-box; }
@@ -1815,140 +1719,315 @@ INDEX_HTML = r"""
       height: 100%;
       margin: 0;
       overflow: hidden;
-      background:
-        radial-gradient(circle at 20% 8%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 30%),
-        radial-gradient(circle at 88% 18%, rgba(255,255,255,0.08), transparent 24%),
-        linear-gradient(135deg, #020617 0%, #0f172a 58%, #111827 100%);
       color: var(--text);
+      background:
+        radial-gradient(circle at 18% 10%, rgba(249, 115, 22, 0.22), transparent 28%),
+        radial-gradient(circle at 70% 18%, rgba(56, 189, 248, 0.15), transparent 28%),
+        linear-gradient(135deg, #020617 0%, #0f172a 58%, #111827 100%);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    .shell {
-      display: grid;
-      grid-template-columns: 1fr 26vw;
-      grid-template-rows: 1fr auto auto;
+    a { color: inherit; }
+
+    .app {
       width: 100vw;
       height: 100vh;
-    }
-
-    .main {
-      grid-column: 1;
-      grid-row: 1;
-      padding: 22px;
-      overflow: hidden;
-    }
-
-    .sidebar {
-      grid-column: 2;
-      grid-row: 1 / 4;
-      position: relative;
-      padding: 18px;
-      overflow: hidden;
-      border-left: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(15,23,42,0.68));
-    }
-
-    .chyron {
-      grid-column: 1;
-      grid-row: 2;
-      min-height: 16vh;
       display: grid;
-      grid-template-columns: 22% 1fr;
-      border-top: 1px solid rgba(255,255,255,0.16);
-      background: linear-gradient(90deg, #020617 0%, #0f172a 55%, color-mix(in srgb, var(--accent) 30%, #020617) 100%);
+      grid-template-columns: minmax(260px, 19vw) 1fr minmax(300px, 23vw);
+      grid-template-rows: 72px 1fr 134px 42px;
+      overflow: hidden;
     }
 
-    .ticker {
-      grid-column: 1;
-      grid-row: 3;
-      height: 4.5vh;
-      min-height: 34px;
-      background: black;
-      overflow: hidden;
-      position: relative;
-      border-top: 1px solid rgba(255,255,255,0.08);
+    .top {
+      grid-column: 1 / 4;
+      grid-row: 1;
+      display: grid;
+      grid-template-columns: minmax(260px, 19vw) 1fr minmax(300px, 23vw);
+      border-bottom: 1px solid var(--line);
+      background: rgba(2, 6, 23, 0.72);
+      backdrop-filter: blur(18px);
     }
 
     .brand {
       display: flex;
       align-items: center;
-      justify-content: center;
-      color: var(--accent);
-      font-size: clamp(28px, 4vw, 58px);
-      font-weight: 950;
-      letter-spacing: -0.06em;
-      border-right: 1px solid rgba(255,255,255,0.16);
-      text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+      padding: 0 22px;
+      font-size: 28px;
+      font-weight: 1000;
+      letter-spacing: -0.08em;
+      text-transform: uppercase;
+      color: white;
+      border-right: 1px solid var(--line);
     }
 
-    .chyron-text {
+    .brand .live-dot {
+      width: 10px;
+      height: 10px;
+      margin-right: 12px;
+      border-radius: 999px;
+      background: var(--hot);
+      box-shadow: 0 0 24px var(--hot);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    .searchbar {
       display: flex;
       align-items: center;
-      padding: 0 34px;
-      font-size: clamp(27px, 4.2vw, 76px);
-      font-weight: 950;
-      line-height: 1.05;
-      letter-spacing: -0.055em;
-      text-transform: uppercase;
+      gap: 10px;
+      padding: 0 20px;
+      border-right: 1px solid var(--line);
     }
 
-    .ticker-text {
-      position: absolute;
-      left: 100vw;
-      top: 50%;
-      transform: translateY(-50%);
-      white-space: nowrap;
-      font-size: 18px;
-      font-weight: 650;
-      animation: marquee var(--ticker-duration, 55s) linear infinite;
+    .searchbar form {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
     }
 
-    @keyframes marquee {
-      from { transform: translate(0, -50%); }
-      to { transform: translate(calc(-100vw - var(--ticker-width, 1800px)), -50%); }
+    .searchbar input {
+      width: 100%;
+      height: 42px;
+      border: 1px solid rgba(148,163,184,.25);
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.8);
+      color: white;
+      padding: 0 16px;
+      outline: none;
+      font-size: 14px;
+      font-weight: 700;
     }
 
-    .topbar {
+    .searchbar button {
+      height: 42px;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--hot), var(--hot2));
+      color: black;
+      padding: 0 18px;
+      font-weight: 1000;
+      letter-spacing: .04em;
+      cursor: pointer;
+    }
+
+    .clock {
       display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      padding-bottom: 16px;
-      margin-bottom: 18px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .title {
-      font-size: clamp(36px, 5vw, 86px);
-      line-height: .95;
-      font-weight: 950;
-      letter-spacing: -0.075em;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-end;
+      padding: 0 20px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .16em;
       text-transform: uppercase;
     }
 
-    .meta {
-      max-width: 42%;
-      text-align: right;
-      color: color-mix(in srgb, var(--accent) 74%, white);
-      font-size: 13px;
+    .clock strong {
+      color: white;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .left {
+      grid-column: 1;
+      grid-row: 2 / 4;
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(2,6,23,.74), rgba(15,23,42,.56));
+    }
+
+    .main {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      padding: 24px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .right {
+      grid-column: 3;
+      grid-row: 2 / 4;
+      min-width: 0;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(2,6,23,.80), rgba(15,23,42,.64));
+    }
+
+    .lower {
+      grid-column: 2;
+      grid-row: 3;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      border-top: 1px solid rgba(255,255,255,.14);
+      background:
+        linear-gradient(90deg, rgba(2,6,23,.98), rgba(15,23,42,.94) 55%, rgba(249,115,22,.32));
+    }
+
+    .ticker {
+      grid-column: 1 / 4;
+      grid-row: 4;
+      min-width: 0;
+      overflow: hidden;
+      background: #000;
+      border-top: 1px solid rgba(255,255,255,.1);
+      position: relative;
+    }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+    .panel {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: white;
+      font-size: 12px;
+      font-weight: 1000;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .panel-title span:last-child {
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .trail-item, .lane, .segment-item {
+      display: block;
+      text-decoration: none;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,.075);
+    }
+
+    .trail-kind, .lane-kind, .segment-label {
+      color: var(--hot2);
+      font-size: 10px;
+      font-weight: 1000;
       letter-spacing: .14em;
       text-transform: uppercase;
     }
 
-    .reason {
-      margin-top: -8px;
-      margin-bottom: 18px;
-      color: var(--muted);
+    .trail-label, .lane-label, .segment-title {
+      margin-top: 3px;
+      color: white;
       font-size: 13px;
-      letter-spacing: .04em;
+      font-weight: 950;
+      line-height: 1.08;
+      text-transform: uppercase;
     }
 
-    .cards-host {
-      height: calc(100% - 132px);
+    .trail-detail, .lane-reason, .segment-dek {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .lane-count {
+      float: right;
+      color: white;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.09);
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .scroll-area {
+      max-height: calc(100vh - 250px);
       overflow: hidden;
     }
 
-    .card-grid {
-      height: 100%;
+    .rundown-area {
+      max-height: calc(100vh - 210px);
+      overflow: hidden;
+    }
+
+    .segment-item.active {
+      margin-left: -18px;
+      margin-right: -18px;
+      padding-left: 18px;
+      padding-right: 18px;
+      background: linear-gradient(90deg, rgba(249,115,22,.22), transparent);
+      border-left: 4px solid var(--hot);
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .kicker {
+      color: var(--hot2);
+      font-size: 13px;
+      font-weight: 1000;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    .headline {
+      margin-top: 7px;
+      max-width: 980px;
+      font-size: clamp(46px, 6.3vw, 112px);
+      line-height: .86;
+      font-weight: 1000;
+      letter-spacing: -0.08em;
+      text-transform: uppercase;
+    }
+
+    .dek {
+      margin-top: 14px;
+      max-width: 760px;
+      color: #cbd5e1;
+      font-size: 16px;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+
+    .why {
+      min-width: 260px;
+      max-width: 360px;
+      padding: 14px;
+      border: 1px solid rgba(249,115,22,.28);
+      border-radius: 18px;
+      background: rgba(249,115,22,.08);
+    }
+
+    .why-title {
+      color: var(--hot2);
+      font-size: 10px;
+      font-weight: 1000;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .why-text {
+      color: #fed7aa;
+      font-size: 12px;
+      line-height: 1.35;
+      font-weight: 750;
+    }
+
+    .cards {
+      height: calc(100% - 205px);
+      margin-top: 18px;
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
       gap: 14px;
@@ -1957,226 +2036,232 @@ INDEX_HTML = r"""
     }
 
     .card {
-      min-height: 144px;
+      min-height: 160px;
       display: grid;
-      grid-template-columns: 56px minmax(0, 1fr) auto;
-      grid-template-rows: 1fr auto;
-      gap: 10px 14px;
-      padding: 18px;
-      border: 1px solid var(--border);
+      grid-template-columns: 54px minmax(0, 1fr) auto;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 7px 12px;
+      padding: 16px;
+      border: 1px solid var(--line);
       border-radius: 20px;
       background:
         linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)),
         var(--panel);
-      box-shadow: 0 24px 50px rgba(0,0,0,.32);
+      box-shadow: 0 24px 70px rgba(0,0,0,.35);
       overflow: hidden;
     }
 
-    .symbol {
-      font-size: 38px;
-      filter: drop-shadow(0 0 18px color-mix(in srgb, var(--accent) 55%, transparent));
+    .card-icon {
+      grid-row: 1 / 4;
+      font-size: 35px;
+      font-weight: 1000;
+      color: var(--hot2);
+      text-shadow: 0 0 24px rgba(250,204,21,.4);
     }
 
-    .card-kicker {
-      color: color-mix(in srgb, var(--accent) 75%, white);
-      font-size: 11px;
-      font-weight: 900;
+    .card-type {
+      color: var(--blue);
+      font-size: 10px;
+      font-weight: 1000;
       letter-spacing: .16em;
       text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .card-title {
-      margin-top: 4px;
       color: white;
-      font-size: 25px;
-      font-weight: 950;
+      font-size: 22px;
+      font-weight: 1000;
       line-height: 1.02;
+      letter-spacing: -0.045em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .card-sub {
-      margin-top: 8px;
-      color: #cbd5e1;
-      font-size: 13px;
-      font-weight: 750;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .card-path {
-      margin-top: 7px;
-      color: #64748b;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.2;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     .card-metric {
+      grid-column: 3;
+      grid-row: 1 / 3;
       color: white;
-      font-size: 27px;
-      font-weight: 950;
+      font-size: 25px;
+      font-weight: 1000;
+      letter-spacing: -0.05em;
       white-space: nowrap;
       text-align: right;
+    }
+
+    .card-path {
+      grid-column: 2 / 4;
+      color: #64748b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .chips {
       grid-column: 2 / 4;
       display: flex;
-      gap: 8px;
       flex-wrap: wrap;
-      max-height: 26px;
+      gap: 6px;
+      max-height: 28px;
       overflow: hidden;
     }
 
-    .chips span {
-      color: #cbd5e1;
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.08);
+    .chip {
+      color: #dbeafe;
+      background: rgba(56,189,248,.08);
+      border: 1px solid rgba(56,189,248,.16);
       border-radius: 999px;
-      padding: 4px 8px;
-      font-size: 11px;
+      padding: 4px 7px;
+      font-size: 10px;
+      font-weight: 800;
     }
 
-    .panel-header {
+    .card-reason {
+      grid-column: 1 / 4;
+      color: #94a3b8;
+      font-size: 11px;
+      line-height: 1.25;
+      max-height: 30px;
+      overflow: hidden;
+    }
+
+    .lower-badge {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--border);
-      font-weight: 900;
-      letter-spacing: .2em;
-      font-size: 13px;
+      justify-content: center;
+      border-right: 1px solid rgba(255,255,255,.15);
+      color: var(--hot2);
+      font-size: 38px;
+      font-weight: 1000;
+      letter-spacing: -0.09em;
+      text-shadow: 0 0 22px rgba(250,204,21,.35);
     }
 
-    .dot {
-      display: inline-block;
-      width: 9px;
-      height: 9px;
-      margin-right: 8px;
-      background: var(--accent);
-      box-shadow: 0 0 14px var(--accent);
-      animation: pulse 1.4s infinite;
-    }
-
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-
-    .rundown-wrap {
-      max-height: 46%;
-      overflow: hidden;
-    }
-
-    .rundown-item {
-      display: grid;
-      grid-template-columns: 34px 1fr;
-      gap: 10px;
-      padding: 10px 0;
-      border-bottom: 1px solid rgba(255,255,255,.07);
-      opacity: .64;
-    }
-
-    .rundown-item.active {
-      opacity: 1;
-      padding-left: 10px;
-      border-left: 3px solid var(--accent);
-      background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent);
-    }
-
-    .idx { color: #64748b; font-size: 12px; font-weight: 900; }
-    .rt { color: white; font-size: 14px; font-weight: 900; text-transform: uppercase; line-height: 1.1; }
-    .rs { margin-top: 4px; color: #94a3b8; font-size: 11px; line-height: 1.2; }
-
-    .channels-header {
-      margin-top: 18px;
-    }
-
-    .channels-wrap {
-      max-height: 42%;
-      overflow: hidden;
-    }
-
-    .channel-link {
-      display: block;
-      color: #cbd5e1;
-      text-decoration: none;
-      padding: 8px 0;
-      border-bottom: 1px solid rgba(255,255,255,.06);
-      opacity: .72;
-    }
-
-    .channel-link:hover {
-      opacity: 1;
-      color: white;
-    }
-
-    .channel-title {
-      font-size: 12px;
-      font-weight: 900;
-      line-height: 1.1;
+    .lower-text {
+      display: flex;
+      align-items: center;
+      padding: 0 26px;
+      font-size: clamp(26px, 3.2vw, 64px);
+      line-height: .95;
+      font-weight: 1000;
+      letter-spacing: -0.065em;
       text-transform: uppercase;
+      overflow: hidden;
     }
 
-    .channel-sub {
-      margin-top: 3px;
-      font-size: 11px;
-      color: #64748b;
+    .ticker-text {
+      position: absolute;
+      left: 100vw;
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      font-size: 17px;
+      font-weight: 850;
+      letter-spacing: .01em;
+      color: white;
+      animation: marquee var(--ticker-duration, 55s) linear infinite;
+    }
+
+    @keyframes marquee {
+      from { transform: translate(0, -50%); }
+      to { transform: translate(calc(-100vw - var(--ticker-width, 1800px)), -50%); }
+    }
+
+    .empty {
+      padding: 24px;
+      border: 1px dashed var(--line);
+      border-radius: 20px;
+      color: var(--muted);
+      font-weight: 800;
     }
 
     .debug {
       position: absolute;
       right: 12px;
-      bottom: 8px;
+      bottom: 48px;
       color: #475569;
-      font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font: 10px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
   </style>
 </head>
-
 <body>
-  <div class="shell">
-    <main class="main">
-      <div class="topbar">
-        <div id="title" class="title">Hypergraph Cadence</div>
-        <div id="meta" class="meta">Booting computed display</div>
+  <div class="app">
+    <header class="top">
+      <div class="brand"><span class="live-dot"></span>EARTH.APP</div>
+      <div class="searchbar">
+        <form id="search-form">
+          <input id="search-input" name="q" placeholder="Ask the graph what Earth is doing…" autocomplete="off" />
+          <button type="submit">FOLLOW STATE</button>
+        </form>
       </div>
-      <div id="reason" class="reason">Waiting for relay state.</div>
-      <div id="cards" class="cards-host"></div>
-    </main>
-
-    <aside class="sidebar">
-      <div class="panel-header">
-        <span><span class="dot"></span>LIVE RUNDOWN</span>
-        <span id="clock">--:-- UTC</span>
+      <div class="clock">
+        <span>Live UTC</span>
+        <strong id="clock">--:--:--</strong>
       </div>
-      <div id="rundown" class="rundown-wrap"></div>
+    </header>
 
-      <div class="panel-header channels-header">
-        <span>DISCOVERED CHANNELS</span>
-        <span>AUTO</span>
+    <aside class="left">
+      <div class="panel">
+        <div class="panel-title"><span>State Trail</span><span>Hypermedia</span></div>
+        <div id="trail"></div>
       </div>
-      <div id="channels" class="channels-wrap"></div>
-
-      <div id="debug" class="debug"></div>
+      <div class="panel">
+        <div class="panel-title"><span>Discovered Lanes</span><span>Not hard-coded</span></div>
+        <div id="lanes" class="scroll-area"></div>
+      </div>
     </aside>
 
-    <section class="chyron">
-      <div id="badge" class="brand">HG</div>
-      <div id="chyron" class="chyron-text">CONNECTING TO HYPERGRAPH</div>
+    <main class="main">
+      <section class="hero">
+        <div>
+          <div id="kicker" class="kicker">Booting Show</div>
+          <div id="headline" class="headline">Following The Graph</div>
+          <div id="dek" class="dek">Earth.app asks the hypergraph what state is available, then turns that state into a live show.</div>
+        </div>
+        <div class="why">
+          <div class="why-title">Why This Is On Screen</div>
+          <div id="why" class="why-text">Waiting for discovered state.</div>
+        </div>
+      </section>
+      <section id="cards" class="cards"></section>
+      <div id="debug" class="debug"></div>
+    </main>
+
+    <aside class="right">
+      <div class="panel">
+        <div class="panel-title"><span>Live Rundown</span><span>Generated</span></div>
+        <div id="segments" class="rundown-area"></div>
+      </div>
+    </aside>
+
+    <section class="lower">
+      <div class="lower-badge">LIVE</div>
+      <div id="lower" class="lower-text">EARTH.APP • FOLLOW THE STATE</div>
     </section>
 
     <section class="ticker">
-      <div id="ticker" class="ticker-text">Waiting for graph state...</div>
+      <div id="ticker" class="ticker-text">Waiting for the global tape…</div>
     </section>
   </div>
 
   <script>
-    let cadenceMs = 8000;
+    const $ = (id) => document.getElementById(id);
+    let cadenceMs = 9000;
 
     function esc(x) {
       return String(x ?? '').replace(/[&<>"']/g, c => ({
@@ -2185,99 +2270,130 @@ INDEX_HTML = r"""
     }
 
     function updateClock() {
-      document.getElementById('clock').textContent =
-        new Date().toLocaleTimeString('en-GB', {
-          timeZone: 'UTC',
-          hour: '2-digit',
-          minute: '2-digit'
-        }) + ' UTC';
+      $('clock').textContent = new Date().toLocaleTimeString('en-GB', {
+        timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+
+    function currentParams() {
+      return new URLSearchParams(window.location.search);
     }
 
     function setTicker(text) {
-      const el = document.getElementById('ticker');
+      const el = $('ticker');
       el.textContent = text || '';
-
       requestAnimationFrame(() => {
-        const w = el.scrollWidth || 1600;
+        const w = el.scrollWidth || 1800;
         el.style.setProperty('--ticker-width', w + 'px');
-        el.style.setProperty('--ticker-duration', Math.max(35, w / 70) + 's');
+        el.style.setProperty('--ticker-duration', Math.max(36, w / 74) + 's');
         el.style.animation = 'none';
         void el.offsetHeight;
         el.style.animation = '';
       });
     }
 
-    function setRundown(stories, activeId) {
-      document.getElementById('rundown').innerHTML = (stories || []).map((s, i) => `
-        <div class="rundown-item ${s.id === activeId ? 'active' : ''}">
-          <div class="idx">${String(i + 1).padStart(2, '0')}</div>
-          <div>
-            <div class="rt">${esc(s.title)}</div>
-            <div class="rs">${esc(s.subtitle || '')}</div>
-          </div>
+    function renderTrail(items) {
+      $('trail').innerHTML = (items || []).map(item => `
+        <div class="trail-item">
+          <div class="trail-kind">${esc(item.kind)}</div>
+          <div class="trail-label">${esc(item.label)}</div>
+          <div class="trail-detail">${esc(item.detail)}</div>
         </div>
       `).join('');
     }
 
-    function setChannels(channels) {
-      const host = document.getElementById('channels');
-
-      host.innerHTML = (channels || []).slice(0, 18).map(c => `
-        <a class="channel-link" href="${esc(c.href)}">
-          <div class="channel-title">${esc(c.title)}</div>
-          <div class="channel-sub">${esc(c.subtitle || '')}</div>
+    function renderLanes(lanes) {
+      $('lanes').innerHTML = (lanes || []).slice(0, 30).map(lane => `
+        <a class="lane" href="${esc(lane.href)}">
+          <span class="lane-count">${esc(lane.count)}</span>
+          <div class="lane-kind">${esc(lane.kind)}</div>
+          <div class="lane-label">${esc(lane.label)}</div>
+          <div class="lane-reason">${esc(lane.reason)}</div>
         </a>
       `).join('');
     }
 
-    async function loadFrame() {
-      const res = await fetch('/api/frame' + window.location.search, { cache: 'no-store' });
-      const p = await res.json();
+    function renderSegments(segments) {
+      $('segments').innerHTML = (segments || []).map((segment, index) => `
+        <div class="segment-item ${segment.active ? 'active' : ''}">
+          <div class="segment-label">${String(index + 1).padStart(2, '0')} • ${esc(segment.label)}</div>
+          <div class="segment-title">${esc(segment.title)}</div>
+          <div class="segment-dek">${esc(segment.dek)}</div>
+        </div>
+      `).join('');
+    }
 
-      if (!p.ok) {
-        throw new Error(p.error || p.message || 'frame error');
+    function renderCards(cards) {
+      if (!cards || !cards.length) {
+        $('cards').innerHTML = '<div class="empty">No cards for this segment. The show may be displaying record-level detail or an empty state.</div>';
+        return;
       }
 
-      cadenceMs = Math.max(2000, Number(p.cadence_seconds || 8) * 1000);
+      $('cards').innerHTML = cards.map(card => `
+        <article class="card">
+          <div class="card-icon">${esc(card.icon)}</div>
+          <div class="card-type">${esc(card.type || card.root || 'entity')}</div>
+          <div class="card-title" title="${esc(card.title)}">${card.href ? `<a href="${esc(card.href)}" target="_blank" rel="noopener noreferrer">${esc(card.title)}</a>` : esc(card.title)}</div>
+          <div class="card-sub">${esc(card.subtitle)}</div>
+          <div class="card-metric">${esc(card.metric)}</div>
+          <div class="card-path">${esc(card.path)}</div>
+          <div class="chips">${(card.chips || []).map(chip => `<span class="chip">${esc(chip)}</span>`).join('')}</div>
+          <div class="card-reason">${esc(card.reason)}</div>
+        </article>
+      `).join('');
+    }
 
-      document.documentElement.style.setProperty('--accent', p.profile?.accent || '#a78bfa');
+    async function loadShow() {
+      const response = await fetch('/api/show' + window.location.search, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!payload.ok) throw new Error(payload.message || payload.error || 'show payload failed');
 
-      document.getElementById('badge').textContent = p.profile?.badge || 'HG';
-      document.getElementById('title').textContent = p.frame?.title || p.profile?.title || 'Hypergraph Cadence';
+      const segment = payload.active_segment || {};
+      $('kicker').textContent = segment.label || 'EARTH.APP';
+      $('headline').textContent = segment.title || 'Earth Is Live';
+      $('dek').textContent = segment.dek || '';
+      $('why').textContent = segment.why || '';
+      $('lower').textContent = payload.lower_third || 'EARTH.APP • LIVE HYPERMEDIA SHOW';
+      $('debug').textContent = `${payload.generated_at} • ${payload.query?.label || ''}`;
 
-      const auto = p.auto_channel ? `AUTO: ${p.auto_channel.title}` : p.query?.label || 'graph sample';
-      document.getElementById('meta').textContent =
-        `${auto} • frame ${(p.frame_index % p.frame_count) + 1}/${p.frame_count}`;
-
-      document.getElementById('reason').textContent = p.frame?.reason || '';
-      document.getElementById('cards').innerHTML = p.cardsHtml || '';
-      document.getElementById('chyron').textContent = p.chyronText || '';
-      document.getElementById('debug').textContent =
-        `${p.generated_at} • ${p.frame?.basis || ''}`;
-
-      setTicker(p.tickerText || '');
-      setRundown(p.rundownStories || [], p.frame?.id);
-      setChannels(p.channels || []);
+      renderCards(segment.cards || []);
+      renderTrail(payload.trail || []);
+      renderLanes(payload.affordances?.lanes || []);
+      renderSegments(payload.segments || []);
+      setTicker(payload.tape || '');
     }
 
     async function safeLoad() {
       try {
-        await loadFrame();
-      } catch (e) {
-        console.error(e);
-        document.getElementById('title').textContent = 'Graph Display Error';
-        document.getElementById('reason').textContent = e.message;
-        document.getElementById('chyron').textContent = 'HYPERGRAPH DISPLAY UNAVAILABLE';
-        setTicker('Unable to compute a display frame from the relay.');
+        await loadShow();
+      } catch (error) {
+        console.error(error);
+        $('kicker').textContent = 'SHOW ERROR';
+        $('headline').textContent = 'Relay State Unavailable';
+        $('dek').textContent = 'Earth.app could not discover or render the hypergraph state.';
+        $('why').textContent = error.message;
+        $('lower').textContent = 'EARTH.APP • HYPERMEDIA RELAY ERROR';
+        setTicker('Relay unavailable or returned an unexpected payload.');
       }
     }
+
+    $('search-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const q = $('search-input').value.trim();
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      window.location.search = params.toString();
+    });
+
+    const existingQ = currentParams().get('q');
+    if (existingQ) $('search-input').value = existingQ;
 
     updateClock();
     setInterval(updateClock, 1000);
 
     async function loop() {
       await safeLoad();
-      setTimeout(loop, cadenceMs);
+      window.setTimeout(loop, cadenceMs);
     }
 
     loop();
@@ -2288,11 +2404,11 @@ INDEX_HTML = r"""
 
 
 # =============================================================================
-# HTTP service
+# HTTP server
 # =============================================================================
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "GenericHyperDisplay/0.3"
+    server_version = "EarthAppShow/0.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[{datetime.now().isoformat(timespec='seconds')}] {self.address_string()} {fmt % args}")
@@ -2318,85 +2434,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
+        params = parse_query_string(parsed.query)
 
         try:
             if parsed.path in {"/", "/index.html"}:
                 return self.send_html(INDEX_HTML)
 
-            if parsed.path == "/health":
+            if parsed.path == "/api/show":
+                return self.send_json(compute_show(params))
+
+            if parsed.path == "/api/health":
                 return self.send_json({
                     "ok": True,
-                    "service": "generic_hyper_display",
+                    "service": "earth_app_show_server",
                     "port": PORT,
                     "hyper_url": HYPER_URL,
-                    "default_limit": DEFAULT_LIMIT,
-                    "default_cadence_seconds": DEFAULT_CADENCE_SECONDS,
-                })
-
-            if parsed.path == "/api/frame":
-                return self.send_json(compute_payload(params))
-
-            if parsed.path == "/api/channels":
-                relay = Relay(HYPER_URL)
-                channels = discover_broad_channels(relay)
-                return self.send_json({
-                    "ok": True,
-                    "channels": [channel_json(channel) for channel in channels],
-                })
-
-            if parsed.path == "/api/debug":
-                relay = Relay(HYPER_URL)
-                state, query_meta = load_query_state(relay, params)
-                cap = analyze(state.entities, state.filters)
-                profile = infer_profile(cap, state, params, query_meta)
-                frames = infer_frames(cap, profile)
-                return self.send_json({
-                    "ok": True,
-                    "state": {
-                        "label": state.label,
-                        "source_url": state.source_url,
-                        "request_pairs": state.request_pairs,
-                        "filters": state.filters,
-                    },
-                    "query_meta": query_meta,
-                    "profile": profile.__dict__,
-                    "frame_count": len(frames),
-                    "frames": [
-                        {
-                            "id": f.id,
-                            "title": f.title,
-                            "basis": f.basis,
-                            "count": len(f.entities),
-                        }
-                        for f in frames
-                    ],
-                    "capabilities": {
-                        "entity_count": len(state.entities),
-                        "types": dict(cap.type_counts.most_common(30)),
-                        "paths": dict(cap.path_counts.most_common(30)),
-                        "facets": {
-                            key: dict(counter.most_common(12))
-                            for key, counter in list(cap.facet_counts.items())[:30]
-                        },
-                        "numbers": dict(cap.number_counts.most_common(30)),
-                        "times": dict(cap.time_counts.most_common(30)),
-                        "refs": dict(cap.ref_counts.most_common(30)),
-                    },
-                    "sample": [
-                        {
-                            "entity_id": e.entity_id,
-                            "entity_type": e.entity_type,
-                            "canonical_path": e.canonical_path,
-                            "display": e.display,
-                            "content_score": content_score(e),
-                            "facets": e.facets,
-                            "numbers": e.numbers,
-                            "times": e.times,
-                            "refs": e.refs,
-                        }
-                        for e in ranked_entities(state.entities)[:15]
-                    ],
+                    "limit": DEFAULT_LIMIT,
+                    "max_pages": MAX_PAGES,
                 })
 
             return self.send_json({
@@ -2405,12 +2459,18 @@ class Handler(BaseHTTPRequestHandler):
                 "path": parsed.path,
             }, status=404)
 
-        except urllib.error.URLError as exc:
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", "replace")[:2000]
+            except Exception:
+                body = ""
             return self.send_json({
                 "ok": False,
-                "error": "relay_unavailable",
+                "error": "relay_http_error",
+                "status": exc.code,
                 "message": str(exc),
-                "hyper_url": HYPER_URL,
+                "body": body,
             }, status=502)
 
         except Exception as exc:
@@ -2422,27 +2482,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-
-    print(f"generic hypergraph display: http://127.0.0.1:{PORT}")
-    print(f"relay:                      {HYPER_URL}")
-    print()
-    print("Try:")
-    print(f"  http://127.0.0.1:{PORT}")
-    print(f"  http://127.0.0.1:{PORT}?q=Trump")
-    print(f"  http://127.0.0.1:{PORT}?type=news_article&q=Trump")
-    print(f"  http://127.0.0.1:{PORT}?source=http%3A%2F%2F127.0.0.1%3A8765%2Fquery%2Fentities%3Fq%3DTrump")
-    print(f"  http://127.0.0.1:{PORT}/api/debug?q=Trump")
-    print()
-    print("Ctrl-C to stop")
-
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    print("=" * 72)
+    print("Earth.app Show Runtime")
+    print(f"open:      http://127.0.0.1:{PORT}")
+    print(f"api:       http://127.0.0.1:{PORT}/api/show")
+    print(f"relay:     {HYPER_URL}")
+    print("mode:      hypermedia discovery, no hard-coded channels")
+    print("=" * 72)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nshutting down")
     finally:
         server.server_close()
-
     return 0
 
 

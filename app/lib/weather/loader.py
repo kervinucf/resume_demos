@@ -1,12 +1,25 @@
+# app/lib/weather/loader.py
+"""
+Read geo locations, fetch an observation for each, write it into root="weather".
+
+Every observation is one record. For each we also write a stable `latest`
+pointer and two browsable backrefs hanging off the source geo location. Search
+is inferred by the relay from the record's data and `kind` — there is no
+hand-written query.
+
+    weather.history.<key>          the observation record (+ value indexes)
+    weather.latest.<key>           a pointer to the newest observation
+    geo.<location>.refs.weather_*  browsable backrefs hanging off the location
+
+Backrefs are their own sidecar nodes; we never re-project the location entity
+from here, so the geo record stays the single source of truth.
+"""
 from __future__ import annotations
 
 import sys
-import time
 from typing import Any
 
-from HyperCoreSDK.python.client import HyperClient
-from HyperCoreSDK.python.helpers.server import create_hyper_server
-from HyperCoreSDK.python.helpers.storage import create_default_storage_directory
+from HyperCoreSDK.python.helpers.loader import Loader, projection
 from HyperCoreSDK.python.helpers.indexes import ScopeSpec, ValueIndexSpec
 from app.utils.dtos.Location import Location
 from app.lib.weather.helpers import observation_from_location
@@ -15,58 +28,31 @@ from app.lib.weather.helpers import observation_from_location
 GEO_ROOT = "geo"
 WEATHER_ROOT = "weather"
 
-LOCATION_QUERY = {
-    "by": {
-        "population_band": ["2_5M-4_9M"],
-    },
-    "country_code": None,
-    "limit": 500,
-}
+# Which geo locations to fetch weather for.
+SELECT_BY = {"population_band": ["2_5M-4_9M"]}
+SELECT_COUNTRY_CODE: str | None = None
+SELECT_LIMIT = 500
+
+
+# Fields each index entry projects for cheap rendering without hydrating the record.
+PROJECT = projection(
+    "name", "country_code", "country_flag_emoji",
+    "temperature", "condition", "observed_at", "lat", "lon",
+)
 
 WEATHER_INDEXES: list[ValueIndexSpec] = [
+    ValueIndexSpec("country_code", "country_code", normalize="upper", link_projections=PROJECT),
+    ValueIndexSpec("condition", "condition", normalize="slug", link_projections=PROJECT),
     ValueIndexSpec(
-        name="country_code",
-        path="country_code",
-        normalize="upper",
-        link_projections={
-            "name": "name",
-            "country_flag_emoji": "country_flag_emoji",
-            "temperature": "temperature",
-            "condition": "condition",
-            "observed_at": "observed_at",
-        },
-    ),
-    ValueIndexSpec(
-        name="condition",
-        path="condition",
-        normalize="slug",
-        link_projections={
-            "name": "name",
-            "country_code": "country_code",
-            "country_flag_emoji": "country_flag_emoji",
-            "temperature": "temperature",
-            "observed_at": "observed_at",
-            "lat": "lat",
-            "lon": "lon",
-        },
-    ),
-    ValueIndexSpec(
-        name="condition",
-        path="condition",
-        normalize="slug",
-        scopes=[ScopeSpec(path="country_code", normalize="upper")],
-        link_projections={
-            "name": "name",
-            "country_code": "country_code",
-            "country_flag_emoji": "country_flag_emoji",
-            "temperature": "temperature",
-            "observed_at": "observed_at",
-        },
+        "condition", "condition", normalize="slug",
+        scopes=[ScopeSpec("country_code", normalize="upper")],
+        link_projections=PROJECT,
     ),
 ]
 
 
 def location_from_data(data: dict[str, Any]) -> Location | None:
+    """Rebuild a Location from a stored geo record so we can fetch weather for it."""
     try:
         kwargs = {
             "geoname_id": str(data["geoname_id"]),
@@ -78,177 +64,103 @@ def location_from_data(data: dict[str, Any]) -> Location | None:
             "timezone": str(data.get("timezone") or ""),
             "elevation": data.get("elevation"),
         }
-
         try:
             return Location(**kwargs, population=int(data.get("population") or 0))
         except TypeError:
             return Location(**kwargs)
-
     except (KeyError, TypeError, ValueError):
         return None
 
+
 def location_filter(data: dict[str, Any]) -> bool:
-    country_code = LOCATION_QUERY.get("country_code")
-
-    if country_code is None:
+    """Optional country gate applied on top of the index selector."""
+    if SELECT_COUNTRY_CODE is None:
         return True
-
-    return str(data.get("country_code") or "").upper() == str(country_code).upper()
-
-
-def write_observation(client: HyperClient, loc: Location) -> str:
-    obs = observation_from_location(loc)
-
-    if obs is None:
-        return f"skip: {loc.name} ({loc.country_code})"
-
-    history_rel = f"history/{obs.record_key()}"
-    history_abs = f"{WEATHER_ROOT}.{history_rel.replace('/', '.')}"
-    latest_abs = f"{WEATHER_ROOT}.latest.{obs.latest_key()}"
-    observed_ms = int(time.time() * 1000)
-
-    preview = {
-        "temperature": obs.temperature,
-        "condition": obs.condition,
-        "observed_at": obs.observed_at,
-    }
-
-    client.write_record_with_indexes(
-        root=WEATHER_ROOT,
-        record_path=history_rel,
-        record_data=obs.to_dict(),
-        index_specs=WEATHER_INDEXES,
-        ref_key=obs.record_key().replace("/", "-"),
-        ref_payload=obs.ref_payload(),
-    )
-
-    client.write_pointer(
-        path=latest_abs,
-        target=history_abs,
-        data=obs.latest_dict(history_abs),
-        links={
-            "location": obs.location_path,
-        },
-        query={
-            "entity_id": latest_abs,
-            "entity_type": "weather_latest",
-            "canonical_path": latest_abs,
-            "display": obs.name,
-            "facets": {
-                "country_code": obs.country_code,
-                "condition": obs.condition,
-                "location_path": obs.location_path,
-            },
-            "times": {
-                "observed_at": observed_ms,
-                "updated_at": observed_ms,
-            },
-            "refs": {
-                "location": obs.location_path,
-                "target": history_abs,
-            },
-            "tokens": [
-                obs.name,
-                obs.country_code,
-                obs.condition,
-            ],
-        },
-    )
-
-    client.write_backref(
-        source=obs.location_path,
-        rel="weather_latest",
-        target=latest_abs,
-        data={
-            "kind": "weather-latest",
-            "target": latest_abs,
-            **preview,
-        },
-        query={
-            "entity_id": obs.location_path,
-            "entity_type": "location",
-            "canonical_path": obs.location_path,
-            "display": obs.name,
-            "facets": {
-                "country_code": obs.country_code,
-                "has_weather": True,
-            },
-            "times": {
-                "weather_latest_at": observed_ms,
-                "activity_latest_at": observed_ms,
-            },
-            "refs": {
-                "weather_latest": latest_abs,
-            },
-            "tokens": [
-                obs.name,
-                obs.country_code,
-            ],
-        },
-    )
-
-    client.write_backref(
-        source=obs.location_path,
-        rel=f"weather.{obs.record_key().split('/', 1)[1].replace('/', '.')}",
-        target=history_abs,
-        data={
-            "kind": "weather-observation",
-            "target": history_abs,
-            **preview,
-        },
-    )
-
-    return f"ok: {obs.name} ({obs.country_code}) — {obs.temperature:.1f}°C, {obs.condition}"
+    return str(data.get("country_code") or "").upper() == SELECT_COUNTRY_CODE.upper()
 
 
-def main(client: HyperClient) -> int:
-    try:
-        count = 0
-        selected = 0
-        print("loading observations....", flush=True)
+def observation_data(obs) -> dict[str, Any]:
+    """One dict that is both the stored record and the thing search is inferred from."""
+    return {"kind": "weather_observation", **obs.to_dict()}
 
-        for loc in client.select_records(
+
+def main() -> int:
+    print("loading observations....", flush=True)
+
+    written = 0
+    with Loader(WEATHER_ROOT) as memory:
+        for loc in memory.select(
             root=GEO_ROOT,
             collection="locations",
             from_data=location_from_data,
-            by=LOCATION_QUERY["by"],
+            by=SELECT_BY,
             where=location_filter,
-            limit=LOCATION_QUERY["limit"],
+            limit=SELECT_LIMIT,
         ):
-            selected += 1
+            obs = observation_from_location(loc)
+            if obs is None:
+                print(f"  skip: {loc.name} ({loc.country_code})", flush=True)
+                continue
+
+            history_rel = f"history/{obs.record_key()}"
+            history_abs = f"{WEATHER_ROOT}.{history_rel.replace('/', '.')}"
+            latest_abs = f"{WEATHER_ROOT}.latest.{obs.latest_key()}"
+            preview = {
+                "temperature": obs.temperature,
+                "condition": obs.condition,
+                "observed_at": obs.observed_at,
+            }
+
+            # Canonical observation record + browsable indexes.
+            memory.record(
+                history_rel,
+                observation_data(obs),
+                indexes=WEATHER_INDEXES,
+                ref_key=obs.record_key().replace("/", "-"),
+                ref_payload=obs.ref_payload(),
+            )
+
+            # Stable "latest" pointer for this location.
+            memory.thing(
+                path=latest_abs,
+                kind="weather_latest",
+                name=obs.name,
+                target=history_abs,
+                body={**obs.latest_dict(history_abs), **preview},
+                links={"location": obs.location_path},
+            )
+
+            # Backrefs hanging off the geo location (sidecars, not a re-projection).
+            memory.link(
+                source=obs.location_path,
+                rel="weather_latest",
+                target=latest_abs,
+                kind="weather-latest",
+                name=obs.name,
+                body=preview,
+                links={"location": obs.location_path},
+            )
+            memory.link(
+                source=obs.location_path,
+                rel=f"weather.{obs.record_key().split('/', 1)[1].replace('/', '.')}",
+                target=history_abs,
+                kind="weather-observation",
+                name=obs.name,
+                body=preview,
+            )
+
+            written += 1
             print(
-                f"selected {selected}: {loc.name} ({loc.country_code}) "
-                f"pop={getattr(loc, 'population', None)}",
+                f"  ok {written}: {obs.name} ({obs.country_code}) — "
+                f"{obs.temperature:.1f}°C, {obs.condition}",
                 flush=True,
             )
 
-            print(f"  fetching weather for {loc.name}...", flush=True)
-            msg = write_observation(client, loc)
-            count += 1
-
-            print(f"  wrote {count}: {msg}", flush=True)
-
-        print(f"done: selected {selected:,}, wrote {count:,} observations", flush=True)
-
-    finally:
-        if client.owns_relay():
-            print(f"relay still running at {client.url} (Ctrl-C to stop)", flush=True)
-            try:
-                client._owned.process.wait()
-            except KeyboardInterrupt:
-                pass
-            finally:
-                client.close()
-        else:
-            client.close()
+        print(f"done: wrote {written:,} observations", flush=True)
+        memory.serve()
 
     return 0
+
+
 if __name__ == "__main__":
-    sys.exit(
-        main(
-            create_hyper_server(
-                root=GEO_ROOT,
-                data_path=create_default_storage_directory(),
-            )
-        )
-    )
+    sys.exit(main())
