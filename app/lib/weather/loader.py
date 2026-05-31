@@ -1,25 +1,24 @@
 # app/lib/weather/loader.py
 """
-Read geo locations, fetch an observation for each, write it into root="weather".
+Read geo locations, observe weather for each, add it to the graph (root="weather").
 
-Every observation is one record. For each we also write a stable `latest`
-pointer and two browsable backrefs hanging off the source geo location. Search
-is inferred by the relay from the record's data and `kind` — there is no
-hand-written query.
+Each observation is one node, with a `latest` pointer node and two edges back to
+the source geo location. Search is inferred by the relay from the node's data and
+`kind` — there is no hand-written query.
 
-    weather.history.<key>          the observation record (+ value indexes)
-    weather.latest.<key>           a pointer to the newest observation
-    geo.<location>.refs.weather_*  browsable backrefs hanging off the location
+    weather.history.<key>          the observation node (+ value indexes)
+    weather.latest.<key>           a pointer node to the newest observation
+    geo.<location>.refs.weather_*  edges linking the location to its weather
 
-Backrefs are their own sidecar nodes; we never re-project the location entity
-from here, so the geo record stays the single source of truth.
+Edges are their own sidecar nodes; we never rewrite the location node from here,
+so the geo node stays the single source of truth.
 """
 from __future__ import annotations
 
 import sys
 from typing import Any
 
-from HyperCoreSDK.python.helpers.loader import Loader, projection
+from HyperCoreSDK.python.helpers.loader import Graph, projection
 from HyperCoreSDK.python.helpers.indexes import ScopeSpec, ValueIndexSpec
 from app.utils.dtos.Location import Location
 from app.lib.weather.helpers import observation_from_location
@@ -28,13 +27,13 @@ from app.lib.weather.helpers import observation_from_location
 GEO_ROOT = "geo"
 WEATHER_ROOT = "weather"
 
-# Which geo locations to fetch weather for.
+# Which geo locations to observe.
 SELECT_BY = {"population_band": ["2_5M-4_9M"]}
 SELECT_COUNTRY_CODE: str | None = None
 SELECT_LIMIT = 500
 
 
-# Fields each index entry projects for cheap rendering without hydrating the record.
+# Fields each index entry carries forward for cheap rendering without rereading the node.
 PROJECT = projection(
     "name", "country_code", "country_flag_emoji",
     "temperature", "condition", "observed_at", "lat", "lon",
@@ -52,7 +51,7 @@ WEATHER_INDEXES: list[ValueIndexSpec] = [
 
 
 def location_from_data(data: dict[str, Any]) -> Location | None:
-    """Rebuild a Location from a stored geo record so we can fetch weather for it."""
+    """Rebuild a Location from a stored geo node so we can fetch weather for it."""
     try:
         kwargs = {
             "geoname_id": str(data["geoname_id"]),
@@ -80,20 +79,20 @@ def location_filter(data: dict[str, Any]) -> bool:
 
 
 def observation_data(obs) -> dict[str, Any]:
-    """One dict that is both the stored record and the thing search is inferred from."""
+    """One dict that is both the stored node and the thing search is inferred from."""
     return {"kind": "weather_observation", **obs.to_dict()}
 
 
 def main() -> int:
-    print("loading observations....", flush=True)
+    print("observing weather for geo locations…", flush=True)
 
     written = 0
-    with Loader(WEATHER_ROOT) as memory:
-        for loc in memory.select(
-            root=GEO_ROOT,
-            collection="locations",
-            from_data=location_from_data,
-            by=SELECT_BY,
+    with Graph(WEATHER_ROOT) as graph:
+        for loc in graph.walk(
+            root_key=GEO_ROOT,
+            path="locations",
+            _return=location_from_data,
+            index=SELECT_BY,
             where=location_filter,
             limit=SELECT_LIMIT,
         ):
@@ -111,42 +110,40 @@ def main() -> int:
                 "observed_at": obs.observed_at,
             }
 
-            # Canonical observation record + browsable indexes.
-            memory.record(
-                history_rel,
-                observation_data(obs),
+            # The observation node + its indexes.
+            graph.add(
+                path=history_rel,
+                content=observation_data(obs),
                 indexes=WEATHER_INDEXES,
-                ref_key=obs.record_key().replace("/", "-"),
-                ref_payload=obs.ref_payload(),
             )
 
-            # Stable "latest" pointer for this location.
-            memory.thing(
-                path=latest_abs,
+            # The latest observation, as a pointer node (add with a target).
+            graph.add(
+                latest_abs,
+                {**obs.latest_dict(history_abs), **preview},
                 kind="weather_latest",
                 name=obs.name,
                 target=history_abs,
-                body={**obs.latest_dict(history_abs), **preview},
                 links={"location": obs.location_path},
             )
 
-            # Backrefs hanging off the geo location (sidecars, not a re-projection).
-            memory.link(
+            # Edges from the geo location to its weather (the geo node is untouched).
+            graph.link(
                 source=obs.location_path,
                 rel="weather_latest",
                 target=latest_abs,
                 kind="weather-latest",
                 name=obs.name,
-                body=preview,
+                content=preview,
                 links={"location": obs.location_path},
             )
-            memory.link(
+            graph.link(
                 source=obs.location_path,
                 rel=f"weather.{obs.record_key().split('/', 1)[1].replace('/', '.')}",
                 target=history_abs,
                 kind="weather-observation",
                 name=obs.name,
-                body=preview,
+                content=preview,
             )
 
             written += 1
@@ -156,8 +153,8 @@ def main() -> int:
                 flush=True,
             )
 
-        print(f"done: wrote {written:,} observations", flush=True)
-        memory.serve()
+        print(f"done: added {written:,} observations", flush=True)
+        graph.serve()
 
     return 0
 

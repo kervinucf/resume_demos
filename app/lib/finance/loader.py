@@ -565,7 +565,7 @@ def ensure_continent(client: HyperClient, continent: str) -> str:
         path=path,
         kind="finance_continent",
         name=continent.upper(),
-        body={
+        content={
             "model": "finance-continent",
             "continent": continent.upper(),
         },
@@ -637,7 +637,7 @@ def write_market_observation(
         path=obs_abs,
         kind="market_observation",
         name=name,
-        body=body,
+        content=body,
         links=links,
     )
 
@@ -646,7 +646,7 @@ def write_market_observation(
         kind="market_asset",
         name=name,
         target=latest_abs,
-        body={
+        content={
             "model": "market-asset",
             "name": name,
             "ticker": ticker,
@@ -671,13 +671,13 @@ def write_market_observation(
         kind="market_latest",
         name=name,
         target=obs_abs,
-        body=latest_market_body(
+        content=latest_market_body(
             name=name,
             ticker=ticker,
             asset_class=asset_class,
             continent=continent,
             target=obs_abs,
-            body=body,
+            content=body,
         ),
         links={
             "target": obs_abs,
@@ -694,7 +694,7 @@ def write_market_observation(
         target=obs_abs,
         kind="market_observation",
         name=f"{name} observation {observed_at.isoformat()}",
-        body={
+        content={
             "ticker": ticker,
             "asset_class": asset_class,
             "last_price": body.get("last_price"),
@@ -715,7 +715,7 @@ def write_market_observation(
             target=asset_abs,
             kind="market_asset_ref",
             name=name,
-            body={
+            content={
                 "ticker": ticker,
                 "asset_class": asset_class,
                 "latest": latest_abs,
@@ -779,7 +779,7 @@ def write_fx_rate(
         path=path,
         kind="fx_rate",
         name=f"{base_currency.upper()} to {quote_currency.upper()}",
-        body=body,
+        content=body,
         links=links,
     )
 
@@ -788,7 +788,7 @@ def write_fx_rate(
         kind="fx_latest",
         name=f"{base_currency.upper()} to {quote_currency.upper()}",
         target=path,
-        body={
+        content={
             "model": "fx-latest",
             **body,
             "target": path,
@@ -809,7 +809,7 @@ def write_fx_rate(
         target=latest,
         kind="fx_rate_ref",
         name=f"{base_currency.upper()} to {quote_currency.upper()}",
-        body={
+        content={
             "base_currency": base_currency.upper(),
             "quote_currency": quote_currency.upper(),
             "rate": rate,

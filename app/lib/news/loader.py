@@ -128,7 +128,7 @@ def write_article(news: Loader, article: NewsArticle) -> str:
         kind="news_latest",
         name=f"{article.region}/{article.source}",
         target=item_abs,
-        body=article.latest_dict(item_abs),
+        content=article.latest_dict(item_abs),
         links=latest_links,
     )
 
@@ -143,7 +143,7 @@ def write_article(news: Loader, article: NewsArticle) -> str:
             target=item_abs,
             kind="news-article",
             name=article.title,
-            body={
+            content={
                 **article.ref_payload(),
                 "published_day": data["published_day"],
             },

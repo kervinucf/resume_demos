@@ -292,7 +292,7 @@ def write_event(eq: Loader, event: EarthquakeEvent, *, fetched_at: str, link_geo
         kind="earthquake_latest",
         name=f"Latest earthquake feed: {event.period}",
         target=event.record_path,
-        body={"period": event.period, "latest_event_id": event.event_id, **event_ref_payload(event)},
+        content={"period": event.period, "latest_event_id": event.event_id, **event_ref_payload(event)},
         links={"latest_event": event.record_path},
     )
 
@@ -306,13 +306,13 @@ def write_event(eq: Loader, event: EarthquakeEvent, *, fetched_at: str, link_geo
             eq.link(
                 source=loc_path, rel=f"earthquakes.{rel_tail}", target=event.record_path,
                 kind="location_earthquake_ref", name=event.title,
-                body={**event_ref_payload(event), "earthquake_path": event.record_path, "location_path": loc_path},
+                content={**event_ref_payload(event), "earthquake_path": event.record_path, "location_path": loc_path},
                 links={"earthquake": event.record_path, "location": loc_path},
             )
             eq.link(
                 source=event.record_path, rel=f"nearby_location.{loc_key}", target=loc_path,
                 kind="earthquake_nearby_location_ref", name=f"Nearby location for {event.title}",
-                body={"event_id": event.event_id, "location_path": loc_path, "radius_hint": DEFAULT_NEARBY_RADIUS},
+                content={"event_id": event.event_id, "location_path": loc_path, "radius_hint": DEFAULT_NEARBY_RADIUS},
                 links={"earthquake": event.record_path, "location": loc_path},
             )
 

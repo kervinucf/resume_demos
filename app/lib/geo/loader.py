@@ -1,10 +1,11 @@
-# app/lib/memory/loader.py
+# app/lib/geo/loader.py
 """
-Bulk-import GeoNames locations into root="memory".
+Build the geo graph from GeoNames locations (root="geo").
 
-Every location is one record. Browsable indexes are built for country_code,
-timezone (scoped by country), and population band. Search is inferred by the
-relay from the record's data and `kind` — there is no hand-written query.
+Every location is one node. Browsable indexes place each node in search space
+by country_code, timezone (scoped by country), and population band. Search is
+inferred by the relay from the node's data and `kind` — there is no hand-written
+query.
 """
 from __future__ import annotations
 
@@ -13,16 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from HyperCoreSDK.python.helpers.loader import BulkLoader, projection
+from HyperCoreSDK.python.helpers.loader import Graph, projection
 from HyperCoreSDK.python.helpers.indexes import ScopeSpec, ValueIndexSpec
 from app.lib.geo.helpers import location_from_row
 
 
-ROOT = "memory"
+ROOT = "geo"
 FINANCE_ROOT = "finance"
 
 
-# Fields each index entry projects for cheap rendering without hydrating the record.
+# Fields each index entry carries forward for cheap rendering without rereading the node.
 PROJECT = projection(
     "name", "country_flag_emoji", "timezone", "lat", "lon",
     "country_name", "continent", "currency_code", "currency_name", "currency_path",
@@ -88,7 +89,7 @@ def load_country_currency(path: Path) -> dict[str, CountryCurrency]:
 
 
 def location_data(loc, currencies: dict[str, CountryCurrency]) -> dict[str, Any]:
-    """One dict that is both the stored record and the thing search is inferred from."""
+    """One dict that is both the stored node and the thing search is inferred from."""
     data: dict[str, Any] = {"kind": "location", **loc.to_dict()}
 
     cc = currencies.get(str(loc.country_code or "").strip().upper())
@@ -109,7 +110,7 @@ def main() -> int:
     currencies = load_country_currency(here / "countryInfo.txt")
     print(f"countryInfo loaded: {len(currencies):,} countries")
 
-    with BulkLoader(ROOT, indexes=LOCATION_INDEXES, reset=True) as memory:
+    with Graph.build(root_key=ROOT, indexes=LOCATION_INDEXES, reset=True) as graph:
         with (here / "allCountries.txt").open("r", encoding="utf-8") as f:
             for line in f:
                 loc = location_from_row(line.rstrip("\n").split("\t"))
@@ -117,22 +118,12 @@ def main() -> int:
                     continue
 
                 data = location_data(loc, currencies)
-                memory.record(
-                    f"locations/{loc.record_key()}",
-                    data,
-                    ref_key=str(loc.geoname_id),
-                    ref_payload={
-                        **loc.ref_payload(),
-                        "country_name": data.get("country_name"),
-                        "continent": data.get("continent"),
-                        "currency_code": data.get("currency_code"),
-                        "currency_name": data.get("currency_name"),
-                        "currency_path": data.get("currency_path"),
-                        "fx_latest_usd_path": data.get("fx_latest_usd_path"),
-                    },
+                graph.add(
+                    path=f"locations/{loc.record_key()}",
+                    content=data,
                 )
 
-        print(f"done: loaded {memory.count:,} locations ({memory.written:,} writes)")
+        print(f"done: built {graph.count:,} locations ({graph.written:,} writes)")
 
     return 0
 

@@ -468,7 +468,7 @@ def write_raw_firehose_frame(
         path=path,
         kind="atproto_raw_firehose_frame",
         name=f"Raw firehose frame {count}",
-        body=body,
+        content=body,
         links={
             "stream": stream_link(path),
             "changes_since": changes_link(path),
@@ -487,7 +487,7 @@ def ensure_repo_shell(client: HyperClient, did: str, observed_at: str) -> None:
         kind="atproto_did",
         name=did,
         target=rpath,
-        body={
+        content={
             "model": "atproto-did",
             "did": did,
             "did_method": did.split(":")[1] if did.startswith("did:") and len(did.split(":")) > 1 else "unknown",
@@ -506,7 +506,7 @@ def ensure_repo_shell(client: HyperClient, did: str, observed_at: str) -> None:
         kind="atproto_repo",
         name=did,
         target=dpath,
-        body={
+        content={
             "model": "atproto-repo",
             "did": did,
             "repo_did": did,
@@ -536,7 +536,7 @@ def write_collection_shell(
         kind="atproto_collection",
         name=collection,
         target=repo_path(did),
-        body={
+        content={
             "model": "atproto-collection",
             "did": did,
             "repo_did": did,
@@ -558,7 +558,7 @@ def write_collection_shell(
         target=path,
         kind="atproto_collection",
         name=collection,
-        body={
+        content={
             "did": did,
             "collection": collection,
         },
@@ -598,7 +598,7 @@ def ensure_topic(client: HyperClient, tag: str, observed_at: str) -> str:
         path=path,
         kind="topic",
         name=f"#{tag}",
-        body=body,
+        content=body,
         links={
             "stream": stream_link(path),
             "changes_since": changes_link(path),
@@ -637,7 +637,7 @@ def ensure_url(client: HyperClient, url: str, observed_at: str) -> str:
         path=path,
         kind="external_url",
         name=host or url,
-        body=body,
+        content=body,
         links={},
     )
 
@@ -663,7 +663,7 @@ def write_topic_links(
             target=topic,
             kind="topic_ref",
             name=f"#{tag}",
-            body={
+            content={
                 "tag": tag,
                 "record": record_path,
             },
@@ -680,7 +680,7 @@ def write_topic_links(
             target=record_path,
             kind="topic_record_ref",
             name=f"Post tagged #{tag}",
-            body={
+            content={
                 "tag": tag,
                 "record": record_path,
             },
@@ -713,7 +713,7 @@ def write_url_links(
             target=target,
             kind="external_url_ref",
             name=url_host(url) or url,
-            body={
+            content={
                 "url": url,
                 "host": url_host(url),
                 "record": record_path,
@@ -731,7 +731,7 @@ def write_url_links(
             target=record_path,
             kind="url_record_ref",
             name=f"Record mentioning {url_host(url) or url}",
-            body={
+            content={
                 "url": url,
                 "host": url_host(url),
                 "record": record_path,
@@ -817,7 +817,7 @@ def write_jetstream_event(
         kind="atproto_jetstream_event",
         name=f"{body.get('kind') or 'event'} {collection} {rkey}".strip(),
         target=links.get("record") or links.get("repo") or path,
-        body=body,
+        content=body,
         links=links,
     )
 
@@ -828,7 +828,7 @@ def write_jetstream_event(
             target=path,
             kind="atproto_jetstream_event",
             name=f"{collection} {operation}".strip(),
-            body={
+            content={
                 "kind": body.get("kind"),
                 "collection": collection,
                 "operation": operation,
@@ -916,7 +916,7 @@ def write_record_from_jetstream_commit(
         kind="atproto_record",
         name=f"{collection}/{rkey}",
         target=collection_path(did, collection),
-        body=body,
+        content=body,
         links={
             "did": did_path(did),
             "repo": repo_path(did),
@@ -933,7 +933,7 @@ def write_record_from_jetstream_commit(
         target=path,
         kind="atproto_record",
         name=f"{collection}/{rkey}",
-        body={
+        content={
             "did": did,
             "collection": collection,
             "rkey": rkey,
@@ -954,7 +954,7 @@ def write_record_from_jetstream_commit(
             target=path,
             kind="atproto_author_record",
             name=f"{collection}/{rkey}",
-            body={
+            content={
                 "did": did,
                 "collection": collection,
                 "rkey": rkey,

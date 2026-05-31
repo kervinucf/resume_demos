@@ -418,7 +418,7 @@ def write_team(lo: Loader, game: SportsGame, team: Any, game_abs: str) -> str:
     tkey = team_key(team)
     lo.thing(
         path=path, kind="sports_team", name=team.display_name, target=game_abs,
-        body={
+        content={
             "model": "sports-team", "team_key": tkey, "team_id": team.team_id, "espn_id": team.team_id,
             "abbreviation": team.abbreviation, "display_name": team.display_name,
             "league": game.league, "sport": game.sport, "latest_game": game_abs,
@@ -437,7 +437,7 @@ def write_venue(lo: Loader, game: SportsGame, game_abs: str) -> str:
     vkey = venue_key(game)
     lo.thing(
         path=path, kind="sports_venue", name=game.venue_name or vkey, target=game_abs,
-        body={
+        content={
             "model": "sports-venue", "venue_key": vkey, "name": game.venue_name,
             "city": game.venue_city, "country": game.venue_country, "latest_game": game_abs,
         },
@@ -463,7 +463,7 @@ def write_athletes(lo: Loader, *, game: SportsGame, game_abs: str, athletes: lis
         lo.thing(
             path=path, kind="sports_athlete",
             name=athlete.get("display_name") or athlete_id, target=game_abs,
-            body={"model": "sports-athlete", **athlete, "athlete_key": akey,
+            content={"model": "sports-athlete", **athlete, "athlete_key": akey,
                   "league": game.league, "sport": game.sport, "latest_game": game_abs},
             links={"latest_game": game_abs, "team": tpath, "games": f"{path}.refs.games",
                    "stream": stream_link(path), "changes_since": changes_link(path)},
@@ -488,7 +488,7 @@ def write_team_athlete_refs(lo: Loader, *, game: SportsGame, game_abs: str, athl
         lo.link(
             source=tpath, rel=f"athletes.{akey}", target=target,
             kind="athlete-ref", name=athlete.get("display_name"),
-            body={"athlete_id": athlete_id, "athlete_key": akey,
+            content={"athlete_id": athlete_id, "athlete_key": akey,
                   "display_name": athlete.get("display_name"), "short_name": athlete.get("short_name"),
                   "headshot": athlete.get("headshot"), "position": athlete.get("position"),
                   "team_id": athlete.get("team_id"), "team_key": tkey,
@@ -545,7 +545,7 @@ def write_leaderboards(lo: Loader, *, game: SportsGame, leaders: list[dict[str, 
             lo.link(
                 source=path, rel=f"{idx:02d}-{row['athlete_key']}", target=row.get("athlete_path"),
                 kind="leaderboard-entry",
-                body={"rank": row.get("rank"), "display_name": row.get("display_name"),
+                content={"rank": row.get("rank"), "display_name": row.get("display_name"),
                       "display_value": row.get("display_value"), "athlete_path": row.get("athlete_path"),
                       "team_path": row.get("team_path"), "game_path": row.get("game_path")},
                 links={"athlete": row.get("athlete_path"), "team": row.get("team_path"), "game": row.get("game_path")},
@@ -570,7 +570,7 @@ def write_game(lo: Loader, game: SportsGame, *, fetched_at: str, summary: dict[s
     lo.thing(
         path=f"{SPORTS_ROOT}.latest.{game.latest_key()}", kind="sports_game",
         name=f"{game.away.abbreviation} @ {game.home.abbreviation}", target=path,
-        body={**game.latest_dict(path), "score_bug_mode": mode},
+        content={**game.latest_dict(path), "score_bug_mode": mode},
         links={"home_team": team_path(game, game.home), "away_team": team_path(game, game.away),
                "venue": venue_path(game), "leaderboards": leaderboards_day_path(game)},
     )
@@ -586,7 +586,7 @@ def write_game(lo: Loader, game: SportsGame, *, fetched_at: str, summary: dict[s
         tpath = write_team(lo, game, team, path)
         lo.link(
             source=tpath, rel=f"games.{matchup}", target=path, kind="sports-game",
-            body={"role": "home" if team.is_home else "away",
+            content={"role": "home" if team.is_home else "away",
                   "matchup": data["matchup"], "status": game.status,
                   "status_detail": game.status_detail, "start_time": game.start_time},
             links={"opponent": team_path(game, game.away if team.is_home else game.home), "venue": venue_path(game)},
@@ -596,7 +596,7 @@ def write_game(lo: Loader, game: SportsGame, *, fetched_at: str, summary: dict[s
     vpath = write_venue(lo, game, path)
     lo.link(
         source=vpath, rel=f"games.{matchup}", target=path, kind="sports-game",
-        body={"matchup": data["matchup"], "status": game.status,
+        content={"matchup": data["matchup"], "status": game.status,
               "status_detail": game.status_detail, "start_time": game.start_time},
         links={"home_team": team_path(game, game.home), "away_team": team_path(game, game.away)},
     )

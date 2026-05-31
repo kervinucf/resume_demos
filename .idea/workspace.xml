@@ -5,7 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="68e5983c-e21b-409d-a047-51c21fad6b09" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/app/lib/geo/help.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -266,7 +266,8 @@
       <workItem from="1776822509293" duration="5785000" />
       <workItem from="1779779215777" duration="2856000" />
       <workItem from="1780039676973" duration="2022000" />
-      <workItem from="1780119481734" duration="3039000" />
+      <workItem from="1780119481734" duration="3091000" />
+      <workItem from="1780122636415" duration="3000" />
     </task>
     <servers />
   </component>

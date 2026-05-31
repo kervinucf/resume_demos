@@ -68,14 +68,14 @@ def _http(
     data: Optional[dict] = None,
     timeout: float = DEFAULT_HTTP_TIMEOUT_S,
 ) -> Any:
-    body = None
+    content = None
     headers = {"Accept": "application/json"}
 
     if data is not None:
-        body = json.dumps(data).encode("utf-8")
+        content = json.dumps(data).encode("utf-8")
         headers["Content-Type"] = "application/json"
 
-    req = urllib.request.Request(url, method=method, data=body, headers=headers)
+    req = urllib.request.Request(url, method=method, data=content, headers=headers)
 
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -521,7 +521,7 @@ class HyperClient:
         path: str,
         kind: str,
         name: str,
-        body: dict[str, Any],
+        content: dict[str, Any],
         links: dict[str, Any] | None = None,
         search: Iterable[Any] | None = None,
         target: str | None = None,
@@ -541,7 +541,7 @@ class HyperClient:
             path=path,
             kind=kind,
             name=name,
-            body=body,
+            content=content,
             links=links,
             search=search,
             target=target,
@@ -556,7 +556,7 @@ class HyperClient:
         path: str,
         kind: str,
         name: str,
-        body: dict[str, Any],
+        content: dict[str, Any],
         links: dict[str, Any] | None = None,
         search: Iterable[Any] | None = None,
         target: str | None = None,
@@ -571,7 +571,7 @@ class HyperClient:
             path=path,
             kind=kind,
             name=name,
-            body=body,
+            content=content,
             links=links,
             search=search,
             target=target,
@@ -586,7 +586,7 @@ class HyperClient:
         source: str,
         rel: str,
         target: str,
-        body: dict[str, Any] | None = None,
+        content: dict[str, Any] | None = None,
         links: dict[str, Any] | None = None,
         kind: str = "link",
         name: str | None = None,
@@ -603,7 +603,7 @@ class HyperClient:
             source=source,
             rel=rel,
             target=target,
-            body=body,
+            content=content,
             links=links,
             kind=kind,
             name=name,
@@ -616,7 +616,7 @@ class HyperClient:
         source: str,
         rel: str,
         target: str,
-        body: dict[str, Any] | None = None,
+        content: dict[str, Any] | None = None,
         links: dict[str, Any] | None = None,
         kind: str = "link",
         name: str | None = None,
@@ -629,81 +629,24 @@ class HyperClient:
             source=source,
             rel=rel,
             target=target,
-            body=body,
+            content=content,
             links=links,
             kind=kind,
             name=name,
             search=search,
         )
 
-    # ------------------------------------------------------------------
-    # Generic resolver helpers
-    # ------------------------------------------------------------------
-
-    def find_one(
-        self,
-        *,
-        kind: str | None = None,
-        search: str | list[str] | None = None,
-        where: dict[str, Any] | None = None,
-        linked_to: dict[str, str] | None = None,
-        has_link: str | list[str] | None = None,
-        limit: int = 10,
-    ) -> str | None:
-        """
-        Find the first matching thing and return its graph path.
-
-        Generic; the framework does not know what a location, venue,
-        article, product, team, or person is.
-        """
-        from HyperCoreSDK.python.helpers.resolve import find_one
-
-        return find_one(
-            self,
-            kind=kind,
-            search=search,
-            where=where,
-            linked_to=linked_to,
-            has_link=has_link,
-            limit=limit,
-        )
-
-    def find_many(
-        self,
-        *,
-        kind: str | None = None,
-        search: str | list[str] | None = None,
-        where: dict[str, Any] | None = None,
-        linked_to: dict[str, str] | None = None,
-        has_link: str | list[str] | None = None,
-        limit: int = 25,
-    ) -> list[str]:
-        """
-        Find matching things and return graph paths.
-        """
-        from HyperCoreSDK.python.helpers.resolve import find_many
-
-        return find_many(
-            self,
-            kind=kind,
-            search=search,
-            where=where,
-            linked_to=linked_to,
-            has_link=has_link,
-            limit=limit,
-        )
-
-    # ------------------------------------------------------------------
+   # ------------------------------------------------------------------
     # Legacy higher-level helpers
     # ------------------------------------------------------------------
 
     def select_records(
         self,
         *,
-        root: str,
-        collection: str,
-        from_data,
-        by: dict | None = None,
+        root_key: str,
+        path: str,
+        _return,
+        index: dict | None = None,
         where=None,
         limit: int | None = None,
         per_page: int = 200,
@@ -712,10 +655,10 @@ class HyperClient:
 
         return select_records(
             self,
-            root=root,
-            collection=collection,
-            from_data=from_data,
-            by=by,
+            root=root_key,
+            collection=path,
+            from_data=_return,
+            by=index,
             where=where,
             limit=limit,
             per_page=per_page,
