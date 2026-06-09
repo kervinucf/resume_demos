@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from itertools import product
 from typing import Any, Iterable, Iterator, Literal
 
-from HyperCoreSDK.python.client import HyperClient
+from HyperCoreSDK.python.helpers.server import HyperServer
 
 
 NormalizeMode = Literal["none", "lower", "upper", "slug"]
@@ -109,11 +109,11 @@ class ValueIndexSpec:
 @dataclass(frozen=True)
 class IndexEntry:
     """
-    One path written to the graph on behalf of one record × index × value.
+    One path written to the database on behalf of one record × index × value.
 
     path   — slash-joined relative path (no root prefix)
     data   — payload dict to write at that path
-    links  — {rel: target_dot_path} to attach as _links on the node
+    links  — {rel: source_dot_path} to attach as _links on the node
     """
     path: str
     data: dict[str, Any]
@@ -349,7 +349,7 @@ def _build_entry_data(
     ref_payload: dict[str, Any],
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
-        "kind": "index_ref",
+        "tag": "index_ref",
         "index_name": spec.name,
         "index_value": value,
         "ref_key": ref_key,
@@ -389,9 +389,9 @@ def _membership_path(record_path: str) -> str:
     return f"_meta/memberships/{digest}"
 
 
-def _read_owned_paths(hc: HyperClient, *, root: str, record_path: str) -> set[str]:
+def _read_owned_paths(server_instance: HyperServer, *, root: str, record_path: str) -> set[str]:
     try:
-        doc = hc.read(dot_path(root, _membership_path(record_path)))
+        doc = server_instance.read(dot_path(root, _membership_path(record_path)))
     except Exception:
         return set()
 
@@ -497,7 +497,7 @@ def plan_upsert(
 # ---------------------------------------------------------------------------
 
 def upsert_with_indexes(
-    hc: HyperClient,
+    server_instance: HyperServer,
     *,
     record_path: str,
     record_data: dict[str, Any],
@@ -512,7 +512,7 @@ def upsert_with_indexes(
     Write a record and its derived index entries in one batch. Reads prior
     ownership, deletes orphans, rewrites the sidecar. Returns op count.
     """
-    effective_root = root or hc.root
+    effective_root = root or server_instance.root
 
     ops = plan_upsert(
         root=effective_root,
@@ -523,15 +523,15 @@ def upsert_with_indexes(
         ref_payload=ref_payload,
         links=links,
         actions=actions,
-        prior_paths=_read_owned_paths(hc, root=effective_root, record_path=record_path),
+        prior_paths=_read_owned_paths(server_instance, root=effective_root, record_path=record_path),
     )
 
-    result = hc.batch(root=effective_root, ops=ops)
+    result = server_instance.batch(root=effective_root, ops=ops)
     return int(result.get("count") or 0)
 
 
 def delete_with_indexes(
-    hc: HyperClient,
+    server_instance: HyperServer,
     *,
     record_path: str,
     root: str | None = None,
@@ -541,8 +541,8 @@ def delete_with_indexes(
     Empty bucket directories evaporate automatically via the relay's
     ancestor pruning.
     """
-    effective_root = root or hc.root
-    owned = _read_owned_paths(hc, root=effective_root, record_path=record_path)
+    effective_root = root or server_instance.root
+    owned = _read_owned_paths(server_instance, root=effective_root, record_path=record_path)
 
     ops: list[dict[str, Any]] = []
     for p in sorted(owned):
@@ -550,5 +550,5 @@ def delete_with_indexes(
     ops.append({"path": dot_path(effective_root, record_path), "delete": True})
     ops.append({"path": dot_path(effective_root, _membership_path(record_path)), "delete": True})
 
-    result = hc.batch(root=effective_root, ops=ops)
+    result = server_instance.batch(root=effective_root, ops=ops)
     return int(result.get("count") or 0)

@@ -1,0 +1,6 @@
+1. load in locations
+2. update weather - load social
+3. update news - load social
+4. update sports - load social
+5. update earthquakes - load social
+6. update finance - load social

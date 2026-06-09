@@ -1,5 +1,12 @@
 HyperCoreSDK/src/node_modules
-app/lib/geo/allCountries.txt
+app/lib/sources/allCountries.txt
+app/lib/sources/countryInfo.txt
 storage
 a
 aa
+app/lib/sources/allCountries.txt
+app/lib/sources/countryInfo.txt
+__pycache__/
+*.pyc
+.DS_Store
+.idea/

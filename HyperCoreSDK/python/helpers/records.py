@@ -86,9 +86,8 @@ def iter_index_record_refs(
 def select_records(
     client,
     *,
-    root: str,
+    namespace: str,
     collection: str,
-    from_data: Callable[[dict[str, Any]], Any | None],
     by: dict[str, Any] | None = None,
     where: Callable[[dict[str, Any]], bool] | None = None,
     limit: int | None = None,
@@ -108,7 +107,7 @@ def select_records(
 
         refs = iter_index_record_refs(
             client,
-            root=root,
+            root=namespace,
             index_name=index_name,
             values=values,
             per_page=per_page,
@@ -116,7 +115,7 @@ def select_records(
     else:
         refs = (
             str(entry.get("_state", {}).get("path") or "")
-            for entry in iter_children(client, f"{root}.{collection}", per_page=per_page)
+            for entry in iter_children(client, f"{namespace}.{collection}", per_page=per_page)
         )
 
     seen: set[str] = set()
@@ -135,11 +134,10 @@ def select_records(
         if where is not None and not where(data):
             continue
 
-        item = from_data(data)
-        if item is None:
+        if data is None:
             continue
 
-        yield item
+        yield data
 
         emitted += 1
         if limit is not None and emitted >= int(limit):
@@ -147,7 +145,7 @@ def select_records(
 
 
 # ---------------------------------------------------------------------------
-# Inference helpers
+# Inference program
 # ---------------------------------------------------------------------------
 
 def _clean_dict(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -347,8 +345,8 @@ def _infer_dates(body: dict[str, Any]) -> dict[str, int]:
     return out
 
 
-def _infer_search(kind: str, name: str, body: dict[str, Any], search: Iterable[Any] | None) -> list[Any]:
-    terms: list[Any] = [kind, name]
+def _infer_search(tag: str, name: str, body: dict[str, Any], search: Iterable[Any] | None) -> list[Any]:
+    terms: list[Any] = [tag, name]
 
     for key, value in body.items():
         if value is None:
@@ -375,17 +373,17 @@ def _query_links(links: dict[str, Any]) -> dict[str, Any]:
     """
     out: dict[str, Any] = {}
 
-    for rel, target in links.items():
-        if target is None:
+    for rel, source in links.items():
+        if source is None:
             continue
 
-        if isinstance(target, (list, tuple, set)):
-            clean = [str(x) for x in target if x is not None and str(x).strip()]
+        if isinstance(source, (list, tuple, set)):
+            clean = [str(x) for x in source if x is not None and str(x).strip()]
             if clean:
                 out[str(rel)] = clean
             continue
 
-        text = str(target).strip()
+        text = str(source).strip()
         if text:
             out[str(rel)] = text
 
@@ -401,17 +399,17 @@ def _node_links(links: dict[str, Any]) -> dict[str, str]:
     """
     out: dict[str, str] = {}
 
-    for rel, target in links.items():
-        if target is None:
+    for rel, source in links.items():
+        if source is None:
             continue
 
-        if isinstance(target, (list, tuple, set)):
-            clean = [str(x) for x in target if x is not None and str(x).strip()]
+        if isinstance(source, (list, tuple, set)):
+            clean = [str(x) for x in source if x is not None and str(x).strip()]
             if len(clean) == 1:
                 out[str(rel)] = clean[0]
             continue
 
-        text = str(target).strip()
+        text = str(source).strip()
         if text:
             out[str(rel)] = text
 
@@ -421,7 +419,7 @@ def _node_links(links: dict[str, Any]) -> dict[str, str]:
 def _query_for_thing(
     *,
     path: str,
-    kind: str,
+    tag: str,
     name: str,
     body: dict[str, Any],
     links: dict[str, Any] | None = None,
@@ -456,15 +454,15 @@ def _query_for_thing(
 
     return {
         "entity_id": path,
-        "entity_type": kind,
+        "entity_type": tag,
         "canonical_path": path,
         "display": name,
-        "text": _text_join(_infer_search(kind, name, body, search)),
+        "text": _text_join(_infer_search(tag, name, body, search)),
         "facets": final_properties,
         "numbers": final_values,
         "times": final_dates,
         "refs": _query_links(links),
-        "tokens": _infer_search(kind, name, body, search),
+        "tokens": _infer_search(tag, name, body, search),
     }
 
 
@@ -472,36 +470,12 @@ def _query_for_thing(
 # Existing advanced writes
 # ---------------------------------------------------------------------------
 
-def write_record_with_indexes(
-    client,
-    *,
-    root: str,
-    record_path: str,
-    record_data: dict[str, Any],
-    index_specs: list[ValueIndexSpec] | None = None,
-    ref_key: str | None = None,
-    ref_payload: dict[str, Any] | None = None,
-    links: dict[str, str] | None = None,
-    actions: dict[str, Any] | None = None,
-) -> int:
-    return upsert_with_indexes(
-        client,
-        root=root,
-        record_path=record_path,
-        record_data=record_data,
-        index_specs=index_specs,
-        ref_key=ref_key,
-        ref_payload=ref_payload,
-        links=links,
-        actions=actions,
-    )
-
 
 def write_pointer(
     client,
     *,
     path: str,
-    target: str,
+    source: str,
     data: dict[str, Any],
     links: dict[str, Any] | None = None,
     query: dict[str, Any] | None = None,
@@ -511,7 +485,7 @@ def write_pointer(
     payload: dict[str, Any] = {
         "data": data,
         "links": {
-            "target": target,
+            "source": source,
             **_node_links(links),
         },
     }
@@ -522,26 +496,6 @@ def write_pointer(
     return client.write(path, payload)
 
 
-def write_backref(
-    client,
-    *,
-    source: str,
-    rel: str,
-    target: str,
-    data: dict[str, Any],
-    links: dict[str, Any] | None = None,
-    query: dict[str, Any] | None = None,
-):
-    return write_pointer(
-        client,
-        path=f"{source}.refs.{rel}",
-        target=target,
-        data=data,
-        links=links,
-        query=query,
-    )
-
-
 # ---------------------------------------------------------------------------
 # KISS writes
 # ---------------------------------------------------------------------------
@@ -550,12 +504,11 @@ def write_thing(
     client,
     *,
     path: str,
-    kind: str,
+    tag: str,
     name: str,
-    body: dict[str, Any],
+    body: Any,
     links: dict[str, Any] | None = None,
     search: Iterable[Any] | None = None,
-    target: str | None = None,
     properties: dict[str, Any] | None = None,
     values: dict[str, Any] | None = None,
     dates: dict[str, Any] | None = None,
@@ -564,7 +517,7 @@ def write_thing(
     KISS write API.
 
     Normal loader code should only need:
-        path, kind, name, body, links
+        path, tag, name, body, links
 
     Advanced overrides are available, but should be rare:
         search, properties, values, dates
@@ -572,13 +525,13 @@ def write_thing(
     body = _clean_dict(body)
     links = _clean_dict(links)
 
-    final_target = target or str(links.get("target") or path)
+    final_source = str(links.get("source") or path)
 
     query = _query_for_thing(
         path=path,
-        kind=kind,
+        tag=tag,
         name=name,
-        content=body,
+        body=body,
         links=links,
         search=search,
         properties=properties,
@@ -589,52 +542,10 @@ def write_thing(
     return write_pointer(
         client,
         path=path,
-        target=final_target,
+        source=final_source,
         data=body,
         links=links,
         query=query,
     )
 
 
-def write_link(
-    client,
-    *,
-    source: str,
-    rel: str,
-    target: str,
-    body: dict[str, Any] | None = None,
-    links: dict[str, Any] | None = None,
-    kind: str = "link",
-    name: str | None = None,
-    search: Iterable[Any] | None = None,
-):
-    """
-    KISS relationship sidecar.
-
-    Writes:
-        <source>.refs.<rel> -> target
-    """
-    path = f"{source}.refs.{rel}"
-
-    body = {
-        "kind": kind,
-        "rel": rel,
-        "target": target,
-        **_clean_dict(body),
-    }
-
-    all_links = {
-        "target": target,
-        **_clean_dict(links),
-    }
-
-    return write_thing(
-        client,
-        path=path,
-        kind=kind,
-        name=name or rel,
-        content=body,
-        links=all_links,
-        target=target,
-        search=search,
-    )

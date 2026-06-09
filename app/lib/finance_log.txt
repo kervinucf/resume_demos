@@ -1,0 +1,6 @@
+2026-06-07 01:32:55 [INFO] Failed to create TzCache, reason: Error creating TzCache folder: '/Users/kervin/Library/Caches/py-yfinance' reason: [Errno 17] File exists: '/Users/kervin/Library/Caches/py-yfinance'. TzCache will not be used. Tip: You can direct cache to use a different location with 'set_tz_cache_location(mylocation)'
+2026-06-07 01:32:55 [INFO] Failed to create TzCache, reason: Error creating TzCache folder: '/Users/kervin/Library/Caches/py-yfinance' reason: [Errno 17] File exists: '/Users/kervin/Library/Caches/py-yfinance'. TzCache will not be used. Tip: You can direct cache to use a different location with 'set_tz_cache_location(mylocation)'
+2026-06-07 01:33:03 [ERROR] $BGN=X: possibly delisted; no price data found  (period=5d)
+2026-06-07 01:33:03 [ERROR] 
+1 Failed download:
+2026-06-07 01:33:03 [ERROR] ['BGN=X']: possibly delisted; no price data found  (period=5d)

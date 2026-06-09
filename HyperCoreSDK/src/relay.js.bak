@@ -520,7 +520,7 @@ function searchContextFromDoc(doc) {
   if (path) {
     ctx.quick.push({
       label: 'references this path',
-      href: `/search/results?ref=${encodeURIComponent(`target:${path}`)}&limit=25&include=facets,refs`
+      href: `/search/results?ref=${encodeURIComponent(`source:${path}`)}&limit=25&include=facets,refs`
     });
 
     ctx.quick.push({
@@ -545,9 +545,9 @@ function searchContextFromDoc(doc) {
 
   if (isObj(q.refs)) {
     for (const [rel, raw] of Object.entries(q.refs)) {
-      for (const target of qAsArray(raw)) {
-        if (!target) continue;
-        const ref = `${rel}:${target}`;
+      for (const source of qAsArray(raw)) {
+        if (!source) continue;
+        const ref = `${rel}:${source}`;
         if (!ctx.ref) ctx.ref = ref;
         if (!ctx.has_ref) ctx.has_ref = rel;
 
@@ -571,8 +571,8 @@ function searchContextFromDoc(doc) {
         href: '/search/results?limit=25&include=facets,refs'
       },
       {
-        label: 'entities with target refs',
-        href: '/search/results?has_ref=target&limit=25&include=facets,refs'
+        label: 'entities with source refs',
+        href: '/search/results?has_ref=source&limit=25&include=facets,refs'
       }
     );
   }
@@ -587,7 +587,7 @@ function renderSearchShell(ctx = {}) {
     <section class="search-shell">
       <form
         hx-get="/search/results"
-        hx-target="#search-results"
+        hx-source="#search-results"
         hx-trigger="submit, keyup changed delay:350ms from:input[name='q'], change from:input"
         hx-push-url="false"
       >
@@ -609,7 +609,7 @@ function renderSearchShell(ctx = {}) {
 
           <div>
             <label>Ref</label>
-            <input name="ref" value="${escapeHtml(ctx.ref || '')}" placeholder="rel:target">
+            <input name="ref" value="${escapeHtml(ctx.ref || '')}" placeholder="rel:source">
           </div>
 
           <div>
@@ -635,7 +635,7 @@ function renderSearchShell(ctx = {}) {
           ${quick.map(item => `
             <a class="pill"
                hx-get="${escapeHtml(item.href)}"
-               hx-target="#search-results"
+               hx-source="#search-results"
                href="${escapeHtml(item.href)}">${escapeHtml(item.label)}</a>
           `).join('')}
         </div>
@@ -690,7 +690,7 @@ function renderFacetChips(item) {
       ${facets.map(f => {
         const facet = `${f.name}:${f.value}`;
         const href = `/search/results?facet=${encodeURIComponent(facet)}&limit=25&include=facets,refs`;
-        return `<a class="pill" hx-get="${escapeHtml(href)}" hx-target="#search-results" href="${escapeHtml(href)}">${escapeHtml(facet)}</a>`;
+        return `<a class="pill" hx-get="${escapeHtml(href)}" hx-source="#search-results" href="${escapeHtml(href)}">${escapeHtml(facet)}</a>`;
       }).join('')}
     </div>
   `;
@@ -703,13 +703,13 @@ function renderRefChips(item) {
   return `
     <div class="row">
       ${refs.map(r => {
-        const ref = `${r.rel}:${r.target_id}`;
+        const ref = `${r.rel}:${r.source_id}`;
         const href = `/search/results?ref=${encodeURIComponent(ref)}&limit=25&include=facets,refs`;
         const hasRefHref = `/search/results?has_ref=${encodeURIComponent(r.rel)}&limit=25&include=facets,refs`;
 
         return `
-          <a class="pill" hx-get="${escapeHtml(href)}" hx-target="#search-results" href="${escapeHtml(href)}">${escapeHtml(ref)}</a>
-          <a class="pill" hx-get="${escapeHtml(hasRefHref)}" hx-target="#search-results" href="${escapeHtml(hasRefHref)}">has_ref:${escapeHtml(r.rel)}</a>
+          <a class="pill" hx-get="${escapeHtml(href)}" hx-source="#search-results" href="${escapeHtml(href)}">${escapeHtml(ref)}</a>
+          <a class="pill" hx-get="${escapeHtml(hasRefHref)}" hx-source="#search-results" href="${escapeHtml(hasRefHref)}">has_ref:${escapeHtml(r.rel)}</a>
         `;
       }).join('')}
     </div>
@@ -747,7 +747,7 @@ function renderSearchResultCard(origin, item) {
       <div class="search-actions">
         ${recordHref ? `<a class="pill" href="${escapeHtml(recordHref)}">Open</a>` : ''}
         ${jsonHref ? `<a class="pill" href="${escapeHtml(jsonHref)}">JSON</a>` : ''}
-        ${sameTypeHref ? `<a class="pill" hx-get="${escapeHtml(sameTypeHref)}" hx-target="#search-results" href="${escapeHtml(sameTypeHref)}">same type</a>` : ''}
+        ${sameTypeHref ? `<a class="pill" hx-get="${escapeHtml(sameTypeHref)}" hx-source="#search-results" href="${escapeHtml(sameTypeHref)}">same type</a>` : ''}
       </div>
     </article>
   `;
@@ -791,7 +791,7 @@ function renderSearchResultsHtml(origin, u) {
 function buildQueryHomeDoc(origin) {
   return {
     _state: {
-      kind: 'query_home',
+      tag: 'query_home',
       path: 'query',
       summary: 'Search indexed hypergraph entities by type, facets, text, refs, numbers, and times.'
     },
@@ -827,7 +827,7 @@ function buildQueryHomeDoc(origin) {
       all_recent: `${origin}/api/query/entities?limit=25&include=facets,refs`,
       by_type: `${origin}/api/query/entities?type=example_type&limit=25&include=facets,refs`,
       by_facet: `${origin}/api/query/entities?facet=name:value&limit=25&include=facets,refs`,
-      by_ref: `${origin}/api/query/entities?ref=rel:target&limit=25&include=facets,refs`
+      by_ref: `${origin}/api/query/entities?ref=rel:source&limit=25&include=facets,refs`
     },
     data: null
   };
@@ -854,7 +854,7 @@ function renderSearchPage(origin, u) {
     limit: firstParam(u, 'limit', '25'),
     quick: [
       { label: 'recent entities', href: '/search/results?limit=25&include=facets,refs' },
-      { label: 'entities with target refs', href: '/search/results?has_ref=target&limit=25&include=facets,refs' }
+      { label: 'entities with source refs', href: '/search/results?has_ref=source&limit=25&include=facets,refs' }
     ]
   })}
 </body>
@@ -898,20 +898,20 @@ function renderStateDocHtml(doc) {
   const embeddedRows = Object.entries(embedded).map(([name, child]) => {
     const childState = isObj(child && child._state) ? child._state : {};
     const childLinks = isObj(child && child._links) ? child._links : {};
-    const href = childLinks.self || childLinks.target || childLinks.record || '';
-    const target = childLinks.target || '';
+    const href = childLinks.self || childLinks.source || childLinks.record || '';
+    const source = childLinks.source || '';
     const record = childLinks.record || '';
-    const summary = childState.summary || childState.kind || '';
-    const kind = childState.kind || '';
+    const summary = childState.summary || childState.tag || '';
+    const tag = childState.tag || '';
 
     return `
       <tr>
         <td>${renderLink(name, href)}</td>
-        <td><code>${escapeHtml(kind)}</code></td>
+        <td><code>${escapeHtml(tag)}</code></td>
         <td>${escapeHtml(summary)}</td>
         <td>
-          ${target ? `<a href="${escapeHtml(target)}">target</a>` : ''}
-          ${record ? `${target ? ' · ' : ''}<a href="${escapeHtml(record)}">record</a>` : ''}
+          ${source ? `<a href="${escapeHtml(source)}">source</a>` : ''}
+          ${record ? `${source ? ' · ' : ''}<a href="${escapeHtml(record)}">record</a>` : ''}
         </td>
       </tr>
     `;
@@ -933,7 +933,7 @@ function renderStateDocHtml(doc) {
   <div class="summary">${escapeHtml(summaryText)}</div>
 
   <div class="bar">
-    <span class="pill">kind: ${escapeHtml(state.kind || '')}</span>
+    <span class="pill">tag: ${escapeHtml(state.tag || '')}</span>
     <span class="pill">children: ${escapeHtml(state.children_total ?? state.roots_total ?? 0)}</span>
     <span class="pill">commit_seq: ${escapeHtml(state.commit_seq ?? 0)}</span>
     <a class="pill" href="?format=json">JSON</a>
@@ -959,9 +959,9 @@ function renderStateDocHtml(doc) {
     <thead>
       <tr>
         <th>name</th>
-        <th>kind</th>
+        <th>tag</th>
         <th>summary</th>
-        <th>target</th>
+        <th>source</th>
       </tr>
     </thead>
     <tbody>
@@ -1044,7 +1044,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     root TEXT NOT NULL,
     path TEXT NOT NULL,
-    op_kind TEXT NOT NULL,
+    op_tag TEXT NOT NULL,
     commit_seq INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     payload TEXT
@@ -1100,13 +1100,13 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS q_refs (
     rel        TEXT NOT NULL,
-    target_id  TEXT NOT NULL,
+    source_id  TEXT NOT NULL,
     entity_id  TEXT NOT NULL,
-    PRIMARY KEY(rel, target_id, entity_id)
+    PRIMARY KEY(rel, source_id, entity_id)
   );
 
   CREATE INDEX IF NOT EXISTS idx_q_refs_entity
-    ON q_refs(entity_id, rel, target_id);
+    ON q_refs(entity_id, rel, source_id);
 
   CREATE TABLE IF NOT EXISTS q_tokens (
     token      TEXT NOT NULL,
@@ -1152,7 +1152,7 @@ const stNextCommitSeq = db.prepare(`
 `);
 
 const stInsertOutbox = db.prepare(`
-  INSERT INTO outbox(root, path, op_kind, commit_seq, updated_at, payload)
+  INSERT INTO outbox(root, path, op_tag, commit_seq, updated_at, payload)
   VALUES (?, ?, ?, ?, ?, ?)
 `);
 
@@ -1207,7 +1207,7 @@ const stNodeMeta = db.prepare(`
 `);
 
 const stOutboxAfter = dbRead.prepare(`
-  SELECT id, root, path, op_kind, commit_seq, updated_at, payload
+  SELECT id, root, path, op_tag, commit_seq, updated_at, payload
   FROM outbox
   WHERE id > ?
   ORDER BY id ASC
@@ -1215,7 +1215,7 @@ const stOutboxAfter = dbRead.prepare(`
 `);
 
 const stOutboxAfterForRoot = dbRead.prepare(`
-  SELECT id, root, path, op_kind, commit_seq, updated_at, payload
+  SELECT id, root, path, op_tag, commit_seq, updated_at, payload
   FROM outbox
   WHERE id > ? AND root = ?
   ORDER BY id ASC
@@ -1259,7 +1259,7 @@ const stQInsertTime = db.prepare(`
 `);
 
 const stQInsertRef = db.prepare(`
-  INSERT OR IGNORE INTO q_refs(rel, target_id, entity_id)
+  INSERT OR IGNORE INTO q_refs(rel, source_id, entity_id)
   VALUES (?, ?, ?)
 `);
 
@@ -1304,7 +1304,7 @@ const stQHasRef = dbRead.prepare(`
 
 const stQRef = dbRead.prepare(`
   SELECT entity_id FROM q_refs
-  WHERE rel = ? AND target_id = ?
+  WHERE rel = ? AND source_id = ?
 `);
 
 const stQCell = dbRead.prepare(`
@@ -1340,10 +1340,10 @@ const stQFacetsForEntity = dbRead.prepare(`
 `);
 
 const stQRefsForEntity = dbRead.prepare(`
-  SELECT rel, target_id
+  SELECT rel, source_id
   FROM q_refs
   WHERE entity_id = ?
-  ORDER BY rel ASC, target_id ASC
+  ORDER BY rel ASC, source_id ASC
 `);
 
 const stQNumbersForEntity = dbRead.prepare(`
@@ -1397,7 +1397,7 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
 
   const canonicalPath = String(q.canonical_path || parts2dp(parts));
   const entityId = String(q.entity_id || canonicalPath);
-  const entityType = String(q.entity_type || data.kind || data.model || 'node');
+  const entityType = String(q.entity_type || data.tag || data.model || 'node');
   const display = q.display || data.name || data.title || data.label || entityId;
 
   qClearEntity(entityId);
@@ -1435,10 +1435,10 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
   }
 
   if (isObj(q.refs)) {
-    for (const [rel, rawTargets] of Object.entries(q.refs)) {
-      for (const rawTarget of qAsArray(rawTargets)) {
-        const target = qString(rawTarget);
-        if (rel && target) stQInsertRef.run(String(rel), target, entityId);
+    for (const [rel, rawSources] of Object.entries(q.refs)) {
+      for (const rawSource of qAsArray(rawSources)) {
+        const source = qString(rawSource);
+        if (rel && source) stQInsertRef.run(String(rel), source, entityId);
       }
     }
   }
@@ -1548,8 +1548,8 @@ function qRunEntityQuery(params) {
     ids = qIntersect(ids, qRowsToIds(stQHasRef.all(String(rel))));
   }
 
-  for (const [rel, target] of qParsePairs(params.ref)) {
-    ids = qIntersect(ids, qRowsToIds(stQRef.all(rel, target)));
+  for (const [rel, source] of qParsePairs(params.ref)) {
+    ids = qIntersect(ids, qRowsToIds(stQRef.all(rel, source)));
   }
 
   for (const [scheme, value] of qParsePairs(params.cell)) {
@@ -1818,8 +1818,8 @@ function classifyNode(node, children, parts) {
 
   if (parts.length === 0) {
     return {
-      kind: 'system_root',
-      item_kind: 'root',
+      tag: 'system_root',
+      item_tag: 'root',
       display_as: 'list',
       primary_link: 'self',
       sort_by: 'name'
@@ -1828,49 +1828,49 @@ function classifyNode(node, children, parts) {
 
   if (parts[0] === '_meta' || parts.includes('_meta')) {
     return {
-      kind: 'system',
-      item_kind: hasChildren ? 'directory' : 'record',
+      tag: 'system',
+      item_tag: hasChildren ? 'directory' : 'record',
       display_as: 'detail',
       primary_link: 'self',
       sort_by: 'name'
     };
   }
 
-  if (hasData && node.data.kind === 'index_ref') {
+  if (hasData && node.data.tag === 'index_ref') {
     return {
-      kind: 'index_ref',
-      item_kind: 'ref',
+      tag: 'index_ref',
+      item_tag: 'ref',
       display_as: 'detail',
       primary_link: 'record',
       sort_by: 'name'
     };
   }
 
-  if (hasData && node.data.kind === 'ref') {
+  if (hasData && node.data.tag === 'ref') {
     return {
-      kind: 'ref',
-      item_kind: 'ref',
+      tag: 'ref',
+      item_tag: 'ref',
       display_as: 'detail',
-      primary_link: 'target',
+      primary_link: 'source',
       sort_by: 'name'
     };
   }
 
-  if (hasData && node.data.kind && String(node.data.kind).endsWith('-ref')) {
+  if (hasData && node.data.tag && String(node.data.tag).endsWith('-ref')) {
     return {
-      kind: node.data.kind,
-      item_kind: 'ref',
+      tag: node.data.tag,
+      item_tag: 'ref',
       display_as: 'detail',
-      primary_link: 'target',
+      primary_link: 'source',
       sort_by: 'name'
     };
   }
 
   if (!hasData && hasChildren && sample.length > 0 &&
-      sample.every(c => c.data && c.data.kind === 'index_ref')) {
+      sample.every(c => c.data && c.data.tag === 'index_ref')) {
     return {
-      kind: 'index_bucket',
-      item_kind: 'ref',
+      tag: 'index_bucket',
+      item_tag: 'ref',
       display_as: 'list',
       primary_link: 'record',
       sort_by: 'name'
@@ -1882,8 +1882,8 @@ function classifyNode(node, children, parts) {
     const childrenAllDirs = sample.length === 0 || sample.every(c => c.data == null);
     if (childrenAllDirs) {
       return {
-        kind: 'index_shelf',
-        item_kind: 'directory',
+        tag: 'index_shelf',
+        item_tag: 'directory',
         display_as: 'list',
         primary_link: 'self',
         sort_by: 'name'
@@ -1892,10 +1892,10 @@ function classifyNode(node, children, parts) {
   }
 
   if (!hasData && hasChildren && sample.length > 0 &&
-      sample.some(c => c.data != null && c.data.kind !== 'index_ref')) {
+      sample.some(c => c.data != null && c.data.tag !== 'index_ref')) {
     return {
-      kind: 'collection',
-      item_kind: 'record',
+      tag: 'collection',
+      item_tag: 'record',
       display_as: 'list',
       primary_link: 'self',
       sort_by: 'name'
@@ -1904,8 +1904,8 @@ function classifyNode(node, children, parts) {
 
   if (hasData && !hasChildren) {
     return {
-      kind: 'record',
-      item_kind: 'field',
+      tag: 'record',
+      item_tag: 'field',
       display_as: 'detail',
       primary_link: 'self',
       sort_by: 'name'
@@ -1914,8 +1914,8 @@ function classifyNode(node, children, parts) {
 
   if (hasData && hasChildren) {
     return {
-      kind: 'record_with_children',
-      item_kind: 'mixed',
+      tag: 'record_with_children',
+      item_tag: 'mixed',
       display_as: 'detail',
       primary_link: 'self',
       sort_by: 'name'
@@ -1923,8 +1923,8 @@ function classifyNode(node, children, parts) {
   }
 
   return {
-    kind: 'directory',
-    item_kind: 'directory',
+    tag: 'directory',
+    item_tag: 'directory',
     display_as: 'list',
     primary_link: 'self',
     sort_by: 'name'
@@ -1935,7 +1935,7 @@ function summarizeNode(cls, node, children, parts) {
   const total = (children && children.total) || 0;
   const name = parts.length ? parts[parts.length - 1] : '/';
 
-  switch (cls.kind) {
+  switch (cls.tag) {
     case 'system_root':
       return `Hypergraph root. ${total} root namespace${total === 1 ? '' : 's'}.`;
 
@@ -1955,8 +1955,8 @@ function summarizeNode(cls, node, children, parts) {
 
     case 'ref': {
       const d = (node && node.data) || {};
-      const target = d.target ? ` → ${d.target}` : '';
-      return `Ref: ${d.rel || name}${target}.`;
+      const source = d.source ? ` → ${d.source}` : '';
+      return `Ref: ${d.rel || name}${source}.`;
     }
 
     case 'athlete-ref': {
@@ -2009,53 +2009,53 @@ function summarizeNode(cls, node, children, parts) {
 function classifyEmbeddedChild(childRow, childParts) {
   if (childParts[0] === '_meta' || childParts.includes('_meta')) {
     return {
-      kind: 'system',
-      item_kind: 'directory',
+      tag: 'system',
+      item_tag: 'directory',
       display_as: 'detail',
       primary_link: 'self'
     };
   }
 
-  if (childRow.data && childRow.data.kind === 'index_ref') {
+  if (childRow.data && childRow.data.tag === 'index_ref') {
     return {
-      kind: 'index_ref',
-      item_kind: 'ref',
+      tag: 'index_ref',
+      item_tag: 'ref',
       display_as: 'detail',
       primary_link: 'record'
     };
   }
 
-  if (childRow.data && childRow.data.kind === 'ref') {
+  if (childRow.data && childRow.data.tag === 'ref') {
     return {
-      kind: 'ref',
-      item_kind: 'ref',
+      tag: 'ref',
+      item_tag: 'ref',
       display_as: 'detail',
-      primary_link: 'target'
+      primary_link: 'source'
     };
   }
 
-  if (childRow.data && childRow.data.kind && String(childRow.data.kind).endsWith('-ref')) {
+  if (childRow.data && childRow.data.tag && String(childRow.data.tag).endsWith('-ref')) {
     return {
-      kind: childRow.data.kind,
-      item_kind: 'ref',
+      tag: childRow.data.tag,
+      item_tag: 'ref',
       display_as: 'detail',
-      primary_link: 'target'
+      primary_link: 'source'
     };
   }
 
-  if (childRow.data && childRow.data.kind === 'sports-game') {
+  if (childRow.data && childRow.data.tag === 'sports-game') {
     return {
-      kind: 'sports-game',
-      item_kind: 'ref',
+      tag: 'sports-game',
+      item_tag: 'ref',
       display_as: 'detail',
-      primary_link: 'target'
+      primary_link: 'source'
     };
   }
 
-  if (childRow.data && childRow.data.kind === 'leaderboard-entry') {
+  if (childRow.data && childRow.data.tag === 'leaderboard-entry') {
     return {
-      kind: 'leaderboard-entry',
-      item_kind: 'ref',
+      tag: 'leaderboard-entry',
+      item_tag: 'ref',
       display_as: 'detail',
       primary_link: 'athlete'
     };
@@ -2063,16 +2063,16 @@ function classifyEmbeddedChild(childRow, childParts) {
 
   if (childRow.data != null) {
     return {
-      kind: 'record',
-      item_kind: 'field',
+      tag: 'record',
+      item_tag: 'field',
       display_as: 'detail',
       primary_link: 'self'
     };
   }
 
   return {
-    kind: 'reference',
-    item_kind: 'directory',
+    tag: 'reference',
+    item_tag: 'directory',
     display_as: 'list',
     primary_link: 'self'
   };
@@ -2081,7 +2081,7 @@ function classifyEmbeddedChild(childRow, childParts) {
 function summarizeEmbeddedChild(cls, childRow, childParts) {
   const name = childParts[childParts.length - 1];
 
-  switch (cls.kind) {
+  switch (cls.tag) {
     case 'index_ref': {
       const d = childRow.data || {};
       const bits = [];
@@ -2093,8 +2093,8 @@ function summarizeEmbeddedChild(cls, childRow, childParts) {
 
     case 'ref': {
       const d = childRow.data || {};
-      const target = d.target ? ` → ${d.target}` : '';
-      return `Ref: ${d.rel || name}${target}.`;
+      const source = d.source ? ` → ${d.source}` : '';
+      return `Ref: ${d.rel || name}${source}.`;
     }
 
     case 'athlete-ref': {
@@ -2189,8 +2189,8 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
   if (node && node.data) {
     promoteDataLinks(origin, links, node.data);
 
-    if (node.data.target && !links.target) {
-      links.target = hrefForMaybeDotPath(origin, node.data.target);
+    if (node.data.source && !links.source) {
+      links.source = hrefForMaybeDotPath(origin, node.data.source);
     }
   }
 
@@ -2227,7 +2227,7 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
     });
   }
 
-  if (cls.kind === 'index_ref' && node && node.data && node.data.record_dot) {
+  if (cls.tag === 'index_ref' && node && node.data && node.data.record_dot) {
     links.record = stateHref(origin, String(node.data.record_dot));
   }
 
@@ -2240,11 +2240,11 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
     const childSummary = summarizeEmbeddedChild(childCls, child, childParts);
 
     const childState = {
-      kind: childCls.kind,
+      tag: childCls.tag,
       path: childDp,
       commit_seq: child.commit_seq,
       hints: {
-        item_kind: childCls.item_kind,
+        item_tag: childCls.item_tag,
         display_as: childCls.display_as,
         primary_link: childCls.primary_link
       }
@@ -2260,8 +2260,8 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
     if (child.data) {
       promoteDataLinks(origin, childLinks, child.data);
 
-      if (child.data.target && !childLinks.target) {
-        childLinks.target = hrefForMaybeDotPath(origin, child.data.target);
+      if (child.data.source && !childLinks.source) {
+        childLinks.source = hrefForMaybeDotPath(origin, child.data.source);
       }
 
       if (child.data.record_dot) {
@@ -2311,7 +2311,7 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
     );
   }
 
-  if (cls.kind === 'index_ref' && node && node.data && node.data.record_dot) {
+  if (cls.tag === 'index_ref' && node && node.data && node.data.record_dot) {
     actions.follow_record = buildAction(
       'GET',
       stateHref(origin, String(node.data.record_dot)),
@@ -2336,22 +2336,22 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
     }
   }
 
-  if (node && node.data && node.data.target && !actions.follow_target) {
-    actions.follow_target = buildAction(
+  if (node && node.data && node.data.source && !actions.follow_source) {
+    actions.follow_source = buildAction(
       'GET',
-      hrefForMaybeDotPath(origin, node.data.target),
+      hrefForMaybeDotPath(origin, node.data.source),
       [],
-      'Follow target.'
+      'Follow source.'
     );
   }
 
   return {
     _state: {
-      kind: cls.kind,
+      tag: cls.tag,
       path: dp || '/',
       summary,
       hints: {
-        item_kind: cls.item_kind,
+        item_tag: cls.item_tag,
         display_as: cls.display_as,
         primary_link: cls.primary_link,
         sort_by: cls.sort_by
@@ -2379,10 +2379,10 @@ function buildSystemRootDoc(origin) {
     links[r] = stateHref(origin, r);
     embedded[r] = {
       _state: {
-        kind: 'reference',
+        tag: 'reference',
         path: r,
         hints: {
-          item_kind: 'directory',
+          item_tag: 'directory',
           display_as: 'list',
           primary_link: 'self'
         }
@@ -2397,11 +2397,11 @@ function buildSystemRootDoc(origin) {
 
   return {
     _state: {
-      kind: 'system_root',
+      tag: 'system_root',
       path: '/',
       summary: `Hypergraph root. ${roots.length} root namespace${roots.length === 1 ? '' : 's'}.`,
       hints: {
-        item_kind: 'root',
+        item_tag: 'root',
         display_as: 'list',
         primary_link: 'self',
         sort_by: 'name'
@@ -2459,7 +2459,7 @@ async function fanoutLoop() {
       deliver.get(cid).push({
         outbox_id: row.id,
         change: {
-          op: row.op_kind,
+          op: row.op_tag,
           path: slash2dp(row.path),
           data: payload ? payload.data : null,
           commit_seq: row.commit_seq,
@@ -2478,7 +2478,7 @@ async function fanoutLoop() {
 
     writeSSE(sub.res, {
       _state: {
-        kind: 'delta',
+        tag: 'delta',
         path: sub.path ? slash2dp(sub.path) : '',
         scope: sub.scope,
         from_seq: sub.commit_cursor,
@@ -2543,7 +2543,7 @@ function buildQueryEntitiesDoc(origin, u) {
   for (const item of result.items) {
     embedded[item.entity_id] = {
       _state: {
-        kind: 'reference',
+        tag: 'reference',
         path: item.canonical_path,
         summary: item.display ? `Result: ${item.display}.` : 'Query result.',
         commit_seq: item.commit_seq
@@ -2569,7 +2569,7 @@ function buildQueryEntitiesDoc(origin, u) {
 
   return {
     _state: {
-      kind: 'query_result',
+      tag: 'query_result',
       path: 'query.entities',
       summary: `${result.total} result${result.total === 1 ? '' : 's'}.`,
       children_total: result.total
@@ -2738,7 +2738,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         filtered.push({
-          op: row.op_kind,
+          op: row.op_tag,
           path: slash2dp(row.path),
           data: payload ? payload.data : null,
           commit_seq: row.commit_seq,
@@ -2750,7 +2750,7 @@ const server = http.createServer(async (req, res) => {
 
       return respondDoc(req, res, u, {
         _state: {
-          kind: 'change_page',
+          tag: 'change_page',
           path: dp,
           cursor,
           next_cursor: nextCursor,
@@ -2811,7 +2811,7 @@ const server = http.createServer(async (req, res) => {
 
       writeSSE(res, {
         _state: {
-          kind: 'cursor',
+          tag: 'cursor',
           path: dp,
           scope,
           commit_seq: initialCursor

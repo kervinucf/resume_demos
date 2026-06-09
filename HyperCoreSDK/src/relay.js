@@ -10,7 +10,7 @@
  * - A dumb agent can start at "/" and navigate/query/mutate by reading:
  *   _state, _links, _actions, _embedded, data.
  * - The hypergraph does not know or care about domain content.
- * - Search is a shortcut action over the graph, not the application itself.
+ * - Search is a shortcut action over the database, not the application itself.
  */
 
 const http = require('http');
@@ -31,6 +31,9 @@ const DEFAULT_PAGE_SIZE = parseInt(process.env.HYPER_PAGE_SIZE || '50', 10);
 const MAX_PAGE_SIZE = parseInt(process.env.HYPER_MAX_PAGE_SIZE || '250', 10);
 const MAX_HTTP_BODY_BYTES = parseInt(process.env.HYPER_MAX_HTTP_BODY_BYTES || '8000000', 10);
 const MAX_RESPONSE_BYTES = parseInt(process.env.HYPER_MAX_RESPONSE_BYTES || '16777216', 10);
+
+const FAST_MAX_LIMIT = parseInt(process.env.HYPER_FAST_MAX_LIMIT || '2000000', 10);
+const FAST_MAX_BODY_BYTES = parseInt(process.env.HYPER_FAST_MAX_BODY || '64000000', 10);
 
 const BATCH_MAX_OPS = parseInt(process.env.HYPER_BATCH_MAX_OPS || '2000', 10);
 const BATCH_MAX_BYTES = parseInt(process.env.HYPER_BATCH_MAX_BYTES || '4000000', 10);
@@ -152,9 +155,9 @@ function parseNumberUnit(raw) {
 function parseScope(raw) {
   const s = String(raw || 'direct').trim().toLowerCase();
   if (!s || s === 'none' || s === 'direct') return { hops: 0 };
-  if (s === 'refs' || s === 'graph') return { hops: 1 };
+  if (s === 'refs' || s === 'database') return { hops: 1 };
 
-  const m = s.match(/^(refs|graph):(\d+)$/);
+  const m = s.match(/^(refs|database):(\d+)$/);
   if (!m) return { hops: 0 };
 
   return { hops: clamp(parseInt(m[2], 10) || 0, 0, 5) };
@@ -208,6 +211,32 @@ function J(res, obj, status = 200) {
     res.end(JSON.stringify({
       error: 'response_too_large',
       message: error.message || 'serialization failed',
+    }));
+    return;
+  }
+
+  res.writeHead(status, {
+    'Content-Type': 'application/json;charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.end(body);
+}
+
+function Jfast(res, obj, status = 200) {
+  if (res.headersSent) return;
+
+  let body;
+
+  try {
+    body = JSON.stringify(obj);
+  } catch (err) {
+    res.writeHead(500, {
+      'Content-Type': 'application/json;charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.end(JSON.stringify({
+      error: 'serialization_failed',
+      message: err && err.message ? err.message : 'serialization failed',
     }));
     return;
   }
@@ -402,7 +431,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     root TEXT NOT NULL,
     path TEXT NOT NULL,
-    op_kind TEXT NOT NULL,
+    op_tag TEXT NOT NULL,
     commit_seq INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     payload TEXT
@@ -453,13 +482,13 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS q_refs (
     rel TEXT NOT NULL,
-    target_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
     entity_id TEXT NOT NULL,
-    PRIMARY KEY(rel, target_id, entity_id)
+    PRIMARY KEY(rel, source_id, entity_id)
   );
 
-  CREATE INDEX IF NOT EXISTS idx_q_refs_entity ON q_refs(entity_id, rel, target_id);
-  CREATE INDEX IF NOT EXISTS idx_q_refs_target ON q_refs(target_id, entity_id, rel);
+  CREATE INDEX IF NOT EXISTS idx_q_refs_entity ON q_refs(entity_id, rel, source_id);
+  CREATE INDEX IF NOT EXISTS idx_q_refs_source ON q_refs(source_id, entity_id, rel);
 
   CREATE TABLE IF NOT EXISTS q_tokens (
     token TEXT NOT NULL,
@@ -490,7 +519,7 @@ const stNextCommitSeq = db.prepare(`
   ON CONFLICT(key) DO UPDATE SET int_value = int_value + 1
   RETURNING int_value
 `);
-const stInsertOutbox = db.prepare(`INSERT INTO outbox(root, path, op_kind, commit_seq, updated_at, payload) VALUES (?, ?, ?, ?, ?, ?)`);
+const stInsertOutbox = db.prepare(`INSERT INTO outbox(root, path, op_tag, commit_seq, updated_at, payload) VALUES (?, ?, ?, ?, ?, ?)`);
 const stOutboxTrim = db.prepare(`DELETE FROM outbox WHERE id <= ?`);
 const stFindByParentNameW = db.prepare(`SELECT id, data FROM nodes WHERE parent_id IS ? AND name = ?`);
 const stNodeMeta = db.prepare(`SELECT id, parent_id, name, path, data, updated_at, commit_seq FROM nodes WHERE id = ?`);
@@ -499,8 +528,8 @@ const stFindByPath = dbRead.prepare(`SELECT id, parent_id, data, updated_at, com
 const stRoots = dbRead.prepare(`SELECT name FROM nodes WHERE parent_id IS NULL ORDER BY name ASC`);
 const stCountChildrenRead = dbRead.prepare(`SELECT COUNT(*) AS c FROM nodes WHERE parent_id = ?`);
 const stMetaGetInt = dbRead.prepare(`SELECT int_value FROM meta WHERE key = ?`);
-const stOutboxAfter = dbRead.prepare(`SELECT id, root, path, op_kind, commit_seq, updated_at, payload FROM outbox WHERE id > ? ORDER BY id ASC LIMIT ?`);
-const stOutboxAfterForRoot = dbRead.prepare(`SELECT id, root, path, op_kind, commit_seq, updated_at, payload FROM outbox WHERE id > ? AND root = ? ORDER BY id ASC LIMIT ?`);
+const stOutboxAfter = dbRead.prepare(`SELECT id, root, path, op_tag, commit_seq, updated_at, payload FROM outbox WHERE id > ? ORDER BY id ASC LIMIT ?`);
+const stOutboxAfterForRoot = dbRead.prepare(`SELECT id, root, path, op_tag, commit_seq, updated_at, payload FROM outbox WHERE id > ? AND root = ? ORDER BY id ASC LIMIT ?`);
 
 const stChildren = {
   key_asc: dbRead.prepare(`SELECT name, data, updated_at, commit_seq FROM nodes WHERE parent_id = ? ORDER BY name ASC LIMIT ? OFFSET ?`),
@@ -539,7 +568,7 @@ const stQEntityIdsForPathW = db.prepare(`SELECT entity_id FROM q_entities WHERE 
 const stQInsertFacet = db.prepare(`INSERT OR IGNORE INTO q_facets(name, value, entity_id) VALUES (?, ?, ?)`);
 const stQInsertNumber = db.prepare(`INSERT OR REPLACE INTO q_numbers(name, value, entity_id) VALUES (?, ?, ?)`);
 const stQInsertTime = db.prepare(`INSERT OR REPLACE INTO q_times(name, value_ms, entity_id) VALUES (?, ?, ?)`);
-const stQInsertRef = db.prepare(`INSERT OR IGNORE INTO q_refs(rel, target_id, entity_id) VALUES (?, ?, ?)`);
+const stQInsertRef = db.prepare(`INSERT OR IGNORE INTO q_refs(rel, source_id, entity_id) VALUES (?, ?, ?)`);
 const stQInsertToken = db.prepare(`INSERT OR IGNORE INTO q_tokens(token, entity_id) VALUES (?, ?)`);
 const stQInsertCell = db.prepare(`INSERT OR IGNORE INTO q_cells(scheme, value, entity_id) VALUES (?, ?, ?)`);
 
@@ -551,8 +580,8 @@ const stQFacet = dbRead.prepare(`SELECT entity_id FROM q_facets WHERE name = ? A
 const stQToken = dbRead.prepare(`SELECT entity_id FROM q_tokens WHERE token = ?`);
 const stQTokenPrefix = dbRead.prepare(`SELECT entity_id FROM q_tokens WHERE token LIKE ?`);
 const stQHasRef = dbRead.prepare(`SELECT entity_id FROM q_refs WHERE rel = ?`);
-const stQRef = dbRead.prepare(`SELECT entity_id FROM q_refs WHERE rel = ? AND target_id = ?`);
-const stQRefsToTarget = dbRead.prepare(`SELECT entity_id, rel, target_id FROM q_refs WHERE target_id = ?`);
+const stQRef = dbRead.prepare(`SELECT entity_id FROM q_refs WHERE rel = ? AND source_id = ?`);
+const stQRefsToSource = dbRead.prepare(`SELECT entity_id, rel, source_id FROM q_refs WHERE source_id = ?`);
 const stQCell = dbRead.prepare(`SELECT entity_id FROM q_cells WHERE scheme = ? AND value = ?`);
 const stQTimeGte = dbRead.prepare(`SELECT entity_id FROM q_times WHERE name = ? AND value_ms >= ?`);
 const stQTimeLte = dbRead.prepare(`SELECT entity_id FROM q_times WHERE name = ? AND value_ms <= ?`);
@@ -562,10 +591,10 @@ const stQNumberBetweenAny = dbRead.prepare(`SELECT entity_id FROM q_numbers WHER
 const stQNumberBetweenNamed = dbRead.prepare(`SELECT entity_id FROM q_numbers WHERE name = ? AND value >= ? AND value <= ?`);
 const stQEntityLoose = dbRead.prepare(`SELECT entity_id FROM q_entities WHERE entity_id LIKE ? OR entity_type LIKE ? OR canonical_path LIKE ? OR display LIKE ?`);
 const stQFacetLoose = dbRead.prepare(`SELECT entity_id FROM q_facets WHERE name LIKE ? OR value LIKE ?`);
-const stQRefLoose = dbRead.prepare(`SELECT entity_id FROM q_refs WHERE rel LIKE ? OR target_id LIKE ?`);
+const stQRefLoose = dbRead.prepare(`SELECT entity_id FROM q_refs WHERE rel LIKE ? OR source_id LIKE ?`);
 const stQCellLoose = dbRead.prepare(`SELECT entity_id FROM q_cells WHERE scheme LIKE ? OR value LIKE ?`);
 const stQFacetsForEntity = dbRead.prepare(`SELECT name, value FROM q_facets WHERE entity_id = ? ORDER BY name ASC, value ASC`);
-const stQRefsForEntity = dbRead.prepare(`SELECT rel, target_id FROM q_refs WHERE entity_id = ? ORDER BY rel ASC, target_id ASC`);
+const stQRefsForEntity = dbRead.prepare(`SELECT rel, source_id FROM q_refs WHERE entity_id = ? ORDER BY rel ASC, source_id ASC`);
 const stQNumbersForEntity = dbRead.prepare(`SELECT name, value FROM q_numbers WHERE entity_id = ? ORDER BY name ASC`);
 const stQTimesForEntity = dbRead.prepare(`SELECT name, value_ms FROM q_times WHERE entity_id = ? ORDER BY name ASC`);
 const stQCellsForEntity = dbRead.prepare(`SELECT scheme, value FROM q_cells WHERE entity_id = ? ORDER BY scheme ASC, value ASC`);
@@ -592,7 +621,7 @@ function qLooksLikeDotPath(value) {
   return /^[A-Za-z0-9_:@-]+(\.[A-Za-z0-9_:@-]+)+$/.test(s);
 }
 
-function qNormalizeRefTarget(value) {
+function qNormalizeRefSource(value) {
   const s = String(value || '').trim();
   if (!s) return '';
   if (/^https?:\/\//i.test(s)) return s;
@@ -673,10 +702,10 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
   const entityId = String((explicit && explicit.entity_id) || canonicalPath);
   const entityType = String(
     (explicit && explicit.entity_type) ||
-    dataObj.kind ||
+    dataObj.tag ||
     dataObj.type ||
     dataObj.model ||
-    (isObj(cleanPayload) && (cleanPayload.kind || cleanPayload.type || cleanPayload.model)) ||
+    (isObj(cleanPayload) && (cleanPayload.tag || cleanPayload.type || cleanPayload.model)) ||
     'node'
   );
 
@@ -721,8 +750,8 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
     if (k && Number.isFinite(ms)) times.set(k, Math.trunc(ms));
   };
 
-  const addRef = (rel, target) => {
-    const clean = qNormalizeRefTarget(target);
+  const addRef = (rel, source) => {
+    const clean = qNormalizeRefSource(source);
     if (clean) qAddEncoded(refs, rel, clean);
   };
 
@@ -753,8 +782,8 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
     }
 
     if (isObj(explicit.refs)) {
-      for (const [rel, rawTargets] of Object.entries(explicit.refs)) {
-        for (const rawTarget of qAsArray(rawTargets)) addRef(rel, rawTarget);
+      for (const [rel, rawSources] of Object.entries(explicit.refs)) {
+        for (const rawSource of qAsArray(rawSources)) addRef(rel, rawSource);
       }
     }
 
@@ -816,16 +845,16 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
 
   for (const links of linkBuckets) {
     for (const [rel, raw] of Object.entries(links)) {
-      for (const target of qAsArray(raw)) {
-        addRef(rel, target);
-        addCell(`link.${rel}`, target);
+      for (const source of qAsArray(raw)) {
+        addRef(rel, source);
+        addCell(`link.${rel}`, source);
         addToken(rel);
-        addToken(target);
+        addToken(source);
       }
     }
   }
 
-  for (const key of ['target', 'record', 'record_dot', 'source', 'parent']) {
+  for (const key of ['source', 'record', 'record_dot', 'source', 'parent']) {
     if (isObj(data) && data[key]) addRef(key, data[key]);
     if (isObj(cleanPayload) && cleanPayload[key]) addRef(key, cleanPayload[key]);
   }
@@ -839,8 +868,8 @@ function qProject(parts, cleanPayload, updatedAt, commitSeq) {
   for (const [name, value] of times.entries()) stQInsertTime.run(name, value, entityId);
 
   for (const encoded of refs) {
-    const [rel, target] = encoded.split('\u0000');
-    if (rel && target) stQInsertRef.run(rel, target, entityId);
+    const [rel, source] = encoded.split('\u0000');
+    if (rel && source) stQInsertRef.run(rel, source, entityId);
   }
 
   for (const token of tokens) stQInsertToken.run(token, entityId);
@@ -1022,6 +1051,173 @@ function buildChildrenPage(dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order = 
   };
 }
 
+
+/* -------------------------------------------------------------------------- */
+/* Fast Bulk Read                                                             */
+/* -------------------------------------------------------------------------- */
+
+const stFastRecord = dbRead.prepare(`SELECT data FROM nodes WHERE root = ? AND path = ?`);
+
+function fastEscapeLike(value) {
+  return String(value).replace(/[\\%_]/g, m => '\\' + m);
+}
+
+function fastOrderSql(order) {
+  switch (String(order || 'key_asc')) {
+    case 'key_desc': return 'path DESC';
+    case 'updated_desc': return 'updated_at DESC, path DESC';
+    case 'updated_asc': return 'updated_at ASC, path ASC';
+    case 'key_asc':
+    default: return 'path ASC';
+  }
+}
+
+function fastClampLimit(value) {
+  const n = parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(n) || n <= 0) return FAST_MAX_LIMIT;
+  return Math.min(n, FAST_MAX_LIMIT);
+}
+
+function fastParseExclude(raw) {
+  const out = [];
+
+  for (const chunk of String(raw || '').split(',')) {
+    const clean = chunk.trim();
+    if (clean) out.push(clean);
+  }
+
+  return out;
+}
+
+function fastBaseWhere({ root, prefix, hasData, exclude, maxDepth }) {
+  const where = ['root = ?'];
+  const args = [root];
+
+  where.push("(path = ? OR path LIKE ? ESCAPE '\\')");
+  args.push(prefix, fastEscapeLike(prefix) + '/%');
+
+  if (hasData) where.push('data IS NOT NULL');
+
+  for (const part of exclude || []) {
+    where.push("('/' || path || '/') NOT LIKE ? ESCAPE '\\'");
+    args.push('%/' + fastEscapeLike(part) + '/%');
+  }
+
+  if (maxDepth != null && Number.isFinite(maxDepth)) {
+    const prefixSlashes = String(prefix).split('/').length - 1;
+    where.push("((LENGTH(path) - LENGTH(REPLACE(path, '/', ''))) - ?) <= ?");
+    args.push(prefixSlashes, maxDepth);
+  }
+
+  return { sql: where.join(' AND '), args };
+}
+
+function fastBuildScan({ root, prefix, order, limit, offset, hasData, exclude, maxDepth, keysOnly }) {
+  const cols = keysOnly ? 'path' : 'path, data';
+  const base = fastBaseWhere({ root, prefix, hasData, exclude, maxDepth });
+
+  let sql = `SELECT ${cols} FROM nodes WHERE ${base.sql} ORDER BY ${fastOrderSql(order)}`;
+  const args = base.args.slice();
+
+  if (limit != null) {
+    sql += ' LIMIT ?';
+    args.push(limit);
+  }
+
+  if (offset) {
+    sql += ' OFFSET ?';
+    args.push(offset);
+  }
+
+  return { sql, args };
+}
+
+function fastBuildTextScan({ root, prefix, positives, negatives, order, limit, hasData, exclude, maxDepth, strict }) {
+  const col = strict ? "json_extract(data, '$.data')" : 'data';
+  const base = fastBaseWhere({ root, prefix, hasData, exclude, maxDepth });
+  const where = [base.sql];
+  const args = base.args.slice();
+
+  for (const term of positives) {
+    const pat = '%' + fastEscapeLike(term) + '%';
+    where.push(`(path LIKE ? ESCAPE '\\' OR ${col} LIKE ? ESCAPE '\\' OR 'record' LIKE ? ESCAPE '\\')`);
+    args.push(pat, pat, pat);
+  }
+
+  for (const term of negatives) {
+    const pat = '%' + fastEscapeLike(term) + '%';
+    where.push(`(path NOT LIKE ? ESCAPE '\\' AND ${col} NOT LIKE ? ESCAPE '\\' AND 'record' NOT LIKE ? ESCAPE '\\')`);
+    args.push(pat, pat, pat);
+  }
+
+  let sql = `SELECT path, data FROM nodes WHERE ${where.join(' AND ')} ORDER BY ${fastOrderSql(order)}`;
+  if (limit != null) {
+    sql += ' LIMIT ?';
+    args.push(limit);
+  }
+
+  return { sql, args };
+}
+
+function fastBuildTextIndex({ root, prefix, positives, order, limit, hasData, exclude, maxDepth }) {
+  const base = fastBaseWhere({ root, prefix, hasData, exclude, maxDepth });
+  const baseSql = base.sql
+    .replace(/\bpath\b/g, 'n.path')
+    .replace(/\bdata\b/g, 'n.data')
+    .replace(/\broot = \?/g, 'n.root = ?');
+
+  const tokenPlaceholders = positives.map(() => '?').join(', ');
+
+  let sql = `
+    SELECT n.path AS path, n.data AS data
+    FROM q_tokens t
+    JOIN q_entities e ON e.entity_id = t.entity_id
+    JOIN nodes n ON n.root = ? AND n.path = REPLACE(e.canonical_path, '.', '/')
+    WHERE t.token IN (${tokenPlaceholders})
+      AND ${baseSql}
+    GROUP BY n.path, n.data
+    HAVING COUNT(DISTINCT t.token) >= ?
+    ORDER BY ${fastOrderSql(order)}
+  `;
+
+  const args = [root, ...positives.map(t => String(t).toLowerCase()), ...base.args];
+  args.push(positives.length);
+
+  if (limit != null) {
+    sql += ' LIMIT ?';
+    args.push(limit);
+  }
+
+  return { sql, args };
+}
+
+function fastParseJson(raw) {
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+function fastParseRows(rows) {
+  return rows.map(row => ({ path: row.path, data: fastParseJson(row.data) }));
+}
+
+function fastReadParams(url) {
+  const q = url.searchParams;
+  return {
+    root: q.get('root') || '',
+    prefix: q.get('prefix') || q.get('root') || '',
+    order: q.get('order') || 'key_asc',
+    hasData: q.get('has_data') !== '0',
+    exclude: fastParseExclude(q.get('exclude')),
+    maxDepth: q.get('max_depth') != null ? parseInt(q.get('max_depth'), 10) : null,
+  };
+}
+
+/* Fast routes to insert inside the HTTP router after /api/search:
+
+
+*/
+
+
 /* -------------------------------------------------------------------------- */
 /* Query Engine                                                               */
 /* -------------------------------------------------------------------------- */
@@ -1147,7 +1343,7 @@ function qApplyBbox(ids, bboxValues, matchedBy) {
     for (const id of direct) {
       if (!matchedBy.has(id)) {
         matchedBy.set(id, {
-          kind: 'measure_direct',
+          tag: 'measure_direct',
           measure: 'bbox',
           path: [id],
           rels: [],
@@ -1192,7 +1388,7 @@ function qApplyRadius(ids, radiusValues, radiusMode, matchedBy) {
 
         if (!matchedBy.has(id)) {
           matchedBy.set(id, {
-            kind: 'measure_direct',
+            tag: 'measure_direct',
             measure: 'radius',
             path: [id],
             rels: [],
@@ -1218,26 +1414,26 @@ function qExpandMeasuredMatches(directIds, scope, matchedBy) {
   for (let hop = 1; hop <= parsed.hops; hop += 1) {
     const next = [];
 
-    for (const target of frontier) {
-      const row = stQEntityById.get(target);
-      const keys = Array.from(new Set([target, row && row.canonical_path].filter(Boolean)));
+    for (const source of frontier) {
+      const row = stQEntityById.get(source);
+      const keys = Array.from(new Set([source, row && row.canonical_path].filter(Boolean)));
 
       for (const key of keys) {
-        for (const edge of stQRefsToTarget.all(key)) {
+        for (const edge of stQRefsToSource.all(key)) {
           if (result.has(edge.entity_id)) continue;
 
           result.add(edge.entity_id);
           next.push(edge.entity_id);
 
-          const prior = matchedBy.get(target) || {
-            kind: 'measure_direct',
+          const prior = matchedBy.get(source) || {
+            tag: 'measure_direct',
             measure: 'related',
-            path: [target],
+            path: [source],
             rels: [],
           };
 
           matchedBy.set(edge.entity_id, {
-            kind: 'measure_ref',
+            tag: 'measure_ref',
             measure: prior.measure,
             path: [edge.entity_id, ...prior.path],
             rels: [edge.rel, ...(prior.rels || [])],
@@ -1337,7 +1533,7 @@ function qAddScore(scores, id, points) {
 function qSetMatch(matchedBy, id, reason) {
   if (!matchedBy.has(id)) {
     matchedBy.set(id, {
-      kind: 'search',
+      tag: 'search',
       terms: [],
       path: [id],
       rels: [],
@@ -1415,7 +1611,7 @@ function qApplyInlineSearchToken(ids, token) {
   if (facet) return qIntersect(ids, qRowsToIds(stQFacet.all(facet[1], facet[2])));
 
   const ref = s.match(/^ref:([^:]+):(.+)$/i);
-  if (ref) return qIntersect(ids, qRowsToIds(stQRef.all(ref[1], qNormalizeRefTarget(ref[2]))));
+  if (ref) return qIntersect(ids, qRowsToIds(stQRef.all(ref[1], qNormalizeRefSource(ref[2]))));
 
   const hasRef = s.match(/^has_ref:(.+)$/i) || s.match(/^rel:(.+)$/i);
   if (hasRef) return qIntersect(ids, qRowsToIds(stQHasRef.all(hasRef[1])));
@@ -1423,7 +1619,7 @@ function qApplyInlineSearchToken(ids, token) {
   const cell = s.match(/^cell:([^:]+):(.+)$/i) || s.match(/^c:([^:]+):(.+)$/i);
   if (cell) return qIntersect(ids, qRowsToIds(stQCell.all(cell[1], cell[2])));
 
-  const type = s.match(/^(type|kind|model):(.+)$/i);
+  const type = s.match(/^(type|tag|model):(.+)$/i);
   if (type) {
     const like = `%${type[2]}%`;
     const matches = new Set(qRowsToIds(stQEntityLoose.all(like, like, like, like)));
@@ -1479,19 +1675,19 @@ function qExpandGraphMatches(seedIds, scope, dir, matchedBy, scores) {
     for (const id of frontier) {
       if (allowOut) {
         for (const edge of stQRefsForEntity.all(id)) {
-          const row = qResolveEntityRow(edge.target_id);
+          const row = qResolveEntityRow(edge.source_id);
           if (!row) continue;
 
-          const target = row.entity_id;
-          if (result.has(target)) continue;
+          const source = row.entity_id;
+          if (result.has(source)) continue;
 
-          result.add(target);
-          next.push(target);
-          qAddScore(scores, target, Math.max(1, 12 - hop));
+          result.add(source);
+          next.push(source);
+          qAddScore(scores, source, Math.max(1, 12 - hop));
 
-          matchedBy.set(target, {
-            kind: 'graph_ref_out',
-            path: [id, target],
+          matchedBy.set(source, {
+            tag: 'graph_ref_out',
+            path: [id, source],
             rels: [edge.rel],
             hops: hop,
           });
@@ -1503,7 +1699,7 @@ function qExpandGraphMatches(seedIds, scope, dir, matchedBy, scores) {
         const keys = Array.from(new Set([id, row && row.canonical_path].filter(Boolean)));
 
         for (const key of keys) {
-          for (const edge of stQRefsToTarget.all(key)) {
+          for (const edge of stQRefsToSource.all(key)) {
             const source = edge.entity_id;
             if (result.has(source)) continue;
 
@@ -1512,7 +1708,7 @@ function qExpandGraphMatches(seedIds, scope, dir, matchedBy, scores) {
             qAddScore(scores, source, Math.max(1, 12 - hop));
 
             matchedBy.set(source, {
-              kind: 'graph_ref_in',
+              tag: 'graph_ref_in',
               path: [source, id],
               rels: [edge.rel],
               hops: hop,
@@ -1672,8 +1868,8 @@ function qRunEntityQuery(params) {
     if (rel) ids = qIntersect(ids, qRowsToIds(stQHasRef.all(String(rel))));
   }
 
-  for (const [rel, target] of qParsePairs(params.ref)) {
-    ids = qIntersect(ids, qRowsToIds(stQRef.all(rel, qNormalizeRefTarget(target))));
+  for (const [rel, source] of qParsePairs(params.ref)) {
+    ids = qIntersect(ids, qRowsToIds(stQRef.all(rel, qNormalizeRefSource(source))));
   }
 
   for (const [scheme, value] of qParsePairs(params.cell)) {
@@ -2103,7 +2299,7 @@ function renderSearchForm(params) {
         <legend>Search</legend>
 
         <label>Intent</label>
-        <input name="q" value="${escapeHtml(params.get('q') || '')}" placeholder="Search words, path, kind, property, number, relationship">
+        <input name="q" value="${escapeHtml(params.get('q') || '')}" placeholder="Search words, path, tag, property, number, relationship">
 
         <label>Type</label>
         <input name="type" value="${escapeHtml(params.get('type') || '')}" placeholder="optional entity_type">
@@ -2168,7 +2364,7 @@ function renderSearchForm(params) {
             <option value="tree" ${params.get('view') === 'tree' ? 'selected' : ''}>path tree</option>
           </select>
 
-          <label>Graph scope</label>
+          <label>Database scope</label>
           <select name="graph_scope">
             <option value="none" ${params.get('graph_scope') === 'none' ? 'selected' : ''}>none</option>
             <option value="refs:1" ${params.get('graph_scope') === 'refs:1' ? 'selected' : ''}>1 hop</option>
@@ -2176,7 +2372,7 @@ function renderSearchForm(params) {
             <option value="refs:3" ${params.get('graph_scope') === 'refs:3' ? 'selected' : ''}>3 hops</option>
           </select>
 
-          <label>Graph direction</label>
+          <label>Database direction</label>
           <select name="graph_dir">
             <option value="both" ${params.get('graph_dir') === 'both' ? 'selected' : ''}>both</option>
             <option value="out" ${params.get('graph_dir') === 'out' ? 'selected' : ''}>outgoing refs</option>
@@ -2369,7 +2565,7 @@ function renderMatchExplanation(origin, item) {
     ? ` distance=${escapeHtml(match.distance.toFixed(3))}`
     : '';
 
-  return `<p>Matched through ${escapeHtml(match.kind || 'search')}: ${parts.join('')}${distance}</p>`;
+  return `<p>Matched through ${escapeHtml(match.tag || 'search')}: ${parts.join('')}${distance}</p>`;
 }
 
 function renderResultCard(origin, params, item) {
@@ -2391,7 +2587,7 @@ function renderResultCard(origin, params, item) {
 
   const refs = (item.refs || [])
     .slice(0, 3)
-    .map(r => `${escapeHtml(r.rel)} -> ${escapeHtml(r.target_id)}`)
+    .map(r => `${escapeHtml(r.rel)} -> ${escapeHtml(r.source_id)}`)
     .join(' | ');
 
   return `
@@ -2570,8 +2766,8 @@ function renderDocHtml(doc) {
   const embeddedRows = Object.entries(embedded.children || embedded).map(([name, child]) => {
     const childState = isObj(child && child._state) ? child._state : {};
     const childLinks = isObj(child && child._links) ? child._links : {};
-    const href = childLinks.self || childLinks.target || childLinks.record || '';
-    return `<tr><td>${href ? `<a href="${escapeHtml(href)}">${escapeHtml(name)}</a>` : escapeHtml(name)}</td><td><code>${escapeHtml(childState.kind || '')}</code></td><td>${escapeHtml(childState.summary || '')}</td></tr>`;
+    const href = childLinks.self || childLinks.source || childLinks.record || '';
+    return `<tr><td>${href ? `<a href="${escapeHtml(href)}">${escapeHtml(name)}</a>` : escapeHtml(name)}</td><td><code>${escapeHtml(childState.tag || '')}</code></td><td>${escapeHtml(childState.summary || '')}</td></tr>`;
   }).join('');
 
   const relatedHref = state.path && state.path !== '/'
@@ -2585,11 +2781,11 @@ function renderDocHtml(doc) {
   <h1>${escapeHtml(state.path || '/')}</h1>
   <p>${escapeHtml(state.summary || '')}</p>
   <nav><a href="?format=json">JSON</a> | <a href="${escapeHtml(relatedHref)}">Search from here</a></nav>
-  <p>kind: ${escapeHtml(state.kind || '')} | children: ${escapeHtml(state.children_total ?? state.roots_total ?? 0)} | commit_seq: ${escapeHtml(state.commit_seq ?? 0)}</p>
+  <p>tag: ${escapeHtml(state.tag || '')} | children: ${escapeHtml(state.children_total ?? state.roots_total ?? 0)} | commit_seq: ${escapeHtml(state.commit_seq ?? 0)}</p>
 
   <h2>Embedded</h2>
   <table>
-    <thead><tr><th>name</th><th>kind</th><th>summary</th></tr></thead>
+    <thead><tr><th>name</th><th>tag</th><th>summary</th></tr></thead>
     <tbody>${embeddedRows || '<tr><td colspan="3">No embedded resources.</td></tr>'}</tbody>
   </table>
 
@@ -2621,7 +2817,7 @@ function searchAction(origin, href = `${origin}/api/query/entities`) {
     { name: 'type', type: 'string', required: false, hint: 'Entity type filter.' },
     { name: 'facet', type: 'string', required: false, repeatable: true, hint: 'name:value' },
     { name: 'has_ref', type: 'string', required: false, repeatable: true, hint: 'Relationship name that must exist.' },
-    { name: 'ref', type: 'string', required: false, repeatable: true, hint: 'rel:target' },
+    { name: 'ref', type: 'string', required: false, repeatable: true, hint: 'rel:source' },
     { name: 'cell', type: 'string', required: false, repeatable: true, hint: 'scheme:value' },
     { name: 'time_gte', type: 'string', required: false, repeatable: true, hint: 'field:date' },
     { name: 'time_lte', type: 'string', required: false, repeatable: true, hint: 'field:date' },
@@ -2648,36 +2844,36 @@ function classifyNode(node, children, parts) {
   const hasChildren = (children && children.total) > 0;
 
   if (parts.length === 0) {
-    return { kind: 'system_root', item_kind: 'root', display_as: 'list', primary_link: 'self', sort_by: 'name' };
+    return { tag: 'system_root', item_tag: 'root', display_as: 'list', primary_link: 'self', sort_by: 'name' };
   }
 
   const d = hasData && isObj(node.data) ? node.data : {};
 
   if (parts[0] === '_meta' || parts.includes('_meta')) {
-    return { kind: 'system', item_kind: hasChildren ? 'directory' : 'record', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
+    return { tag: 'system', item_tag: hasChildren ? 'directory' : 'record', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
   }
 
-  if (d.kind === 'index_ref') {
-    return { kind: 'index_ref', item_kind: 'ref', display_as: 'detail', primary_link: 'record', sort_by: 'name' };
+  if (d.tag === 'index_ref') {
+    return { tag: 'index_ref', item_tag: 'ref', display_as: 'detail', primary_link: 'record', sort_by: 'name' };
   }
 
-  if (d.kind === 'ref' || d.target || d.record_dot) {
-    return { kind: d.kind || 'ref', item_kind: 'ref', display_as: 'detail', primary_link: d.record_dot ? 'record' : 'target', sort_by: 'name' };
+  if (d.tag === 'ref' || d.source || d.record_dot) {
+    return { tag: d.tag || 'ref', item_tag: 'ref', display_as: 'detail', primary_link: d.record_dot ? 'record' : 'source', sort_by: 'name' };
   }
 
   if (hasData && hasChildren) {
-    return { kind: d.kind || d.type || d.model || 'record_with_children', item_kind: 'mixed', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
+    return { tag: d.tag || d.type || d.model || 'record_with_children', item_tag: 'mixed', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
   }
 
   if (hasData) {
-    return { kind: d.kind || d.type || d.model || 'record', item_kind: 'field', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
+    return { tag: d.tag || d.type || d.model || 'record', item_tag: 'field', display_as: 'detail', primary_link: 'self', sort_by: 'name' };
   }
 
   if (hasChildren) {
-    return { kind: 'directory', item_kind: 'directory', display_as: 'list', primary_link: 'self', sort_by: 'name' };
+    return { tag: 'directory', item_tag: 'directory', display_as: 'list', primary_link: 'self', sort_by: 'name' };
   }
 
-  return { kind: 'directory', item_kind: 'directory', display_as: 'list', primary_link: 'self', sort_by: 'name' };
+  return { tag: 'directory', item_tag: 'directory', display_as: 'list', primary_link: 'self', sort_by: 'name' };
 }
 
 function summarizeNode(cls, node, children, parts) {
@@ -2685,9 +2881,9 @@ function summarizeNode(cls, node, children, parts) {
   const name = parts.length ? parts[parts.length - 1] : '/';
   const d = node && isObj(node.data) ? node.data : {};
 
-  if (cls.kind === 'system_root') return `Hypergraph root. ${total} root namespace${total === 1 ? '' : 's'}.`;
-  if (cls.item_kind === 'ref') return `Reference: ${d.name || d.rel || name}${d.target ? ` -> ${d.target}` : ''}${d.record_dot ? ` -> ${d.record_dot}` : ''}.`;
-  if (cls.kind === 'record' || cls.kind === 'record_with_children') return `Record: ${d.name || d.title || d.display_name || d.label || d.id || name}.`;
+  if (cls.tag === 'system_root') return `Hypergraph root. ${total} root namespace${total === 1 ? '' : 's'}.`;
+  if (cls.item_tag === 'ref') return `Reference: ${d.name || d.rel || name}${d.source ? ` -> ${d.source}` : ''}${d.record_dot ? ` -> ${d.record_dot}` : ''}.`;
+  if (cls.tag === 'record' || cls.tag === 'record_with_children') return `Record: ${d.name || d.title || d.display_name || d.label || d.id || name}.`;
 
   return total
     ? `Directory: ${name} (${total} entr${total === 1 ? 'y' : 'ies'}).`
@@ -2707,18 +2903,18 @@ function childDoc(origin, childDp, row) {
 
   if (row.data) {
     promoteDataLinks(origin, links, row.data);
-    if (row.data.target && !links.target) links.target = hrefForMaybeDotPath(origin, row.data.target);
+    if (row.data.source && !links.source) links.source = hrefForMaybeDotPath(origin, row.data.source);
     if (row.data.record_dot && !links.record) links.record = stateHref(origin, String(row.data.record_dot));
   }
 
   return {
     _state: {
-      kind: cls.kind,
+      tag: cls.tag,
       path: childDp,
       summary: summarizeNode(cls, node, { total: 0 }, parts),
       commit_seq: row.commit_seq,
       hints: {
-        item_kind: cls.item_kind,
+        item_tag: cls.item_tag,
         display_as: cls.display_as,
         primary_link: cls.primary_link,
       },
@@ -2750,7 +2946,7 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
 
   if (node && node.data) {
     promoteDataLinks(origin, links, node.data);
-    if (node.data.target && !links.target) links.target = hrefForMaybeDotPath(origin, node.data.target);
+    if (node.data.source && !links.source) links.source = hrefForMaybeDotPath(origin, node.data.source);
     if (node.data.record_dot && !links.record) links.record = stateHref(origin, String(node.data.record_dot));
   }
 
@@ -2786,14 +2982,14 @@ function buildNodeDoc(origin, dp, { page = 1, perPage = DEFAULT_PAGE_SIZE, order
 
   return {
     _state: {
-      kind: cls.kind,
+      tag: cls.tag,
       path: dp || '/',
       summary: summarizeNode(cls, node, childrenPage, parts),
       protocol: {
         agent_instruction: 'Read _state. Follow _links. Use _actions. Inspect _embedded. Treat data as opaque unless an action explains how to query it.',
       },
       hints: {
-        item_kind: cls.item_kind,
+        item_tag: cls.item_tag,
         display_as: cls.display_as,
         primary_link: cls.primary_link,
         sort_by: cls.sort_by,
@@ -2833,7 +3029,7 @@ function buildSystemRootDoc(origin) {
     links[root] = stateHref(origin, root);
     embedded[root] = {
       _state: {
-        kind: 'root_namespace',
+        tag: 'root_namespace',
         path: root,
         summary: `Root namespace ${root}.`,
       },
@@ -2851,7 +3047,7 @@ function buildSystemRootDoc(origin) {
 
   return {
     _state: {
-      kind: 'system_root',
+      tag: 'system_root',
       path: '/',
       summary: `Root of the hypergraph. ${roots.length} namespace${roots.length === 1 ? '' : 's'} available.`,
       protocol: {
@@ -2899,7 +3095,7 @@ function buildQueryEntitiesDoc(origin, url) {
   for (const item of result.items) {
     embedded[item.entity_id] = {
       _state: {
-        kind: 'query_result_item',
+        tag: 'query_result_item',
         path: item.canonical_path,
         summary: item.display ? `Result: ${item.display}.` : 'Query result.',
         commit_seq: item.commit_seq,
@@ -2915,7 +3111,7 @@ function buildQueryEntitiesDoc(origin, url) {
 
   return {
     _state: {
-      kind: 'query_result',
+      tag: 'query_result',
       path: 'query.entities',
       summary: `${result.total} result${result.total === 1 ? '' : 's'}.`,
       protocol: {
@@ -2943,7 +3139,7 @@ function buildQueryEntitiesDoc(origin, url) {
 function buildQueryHomeDoc(origin) {
   return {
     _state: {
-      kind: 'query_home',
+      tag: 'query_home',
       path: 'query',
       summary: 'Query/search affordances for the hypergraph.',
       protocol: {
@@ -3098,7 +3294,7 @@ async function fanoutLoop() {
       deliver.get(cid).push({
         outbox_id: row.id,
         change: {
-          op: row.op_kind,
+          op: row.op_tag,
           path: slash2dp(row.path),
           data: payload ? payload.data : null,
           commit_seq: row.commit_seq,
@@ -3117,7 +3313,7 @@ async function fanoutLoop() {
 
     writeSSE(sub.res, {
       _state: {
-        kind: 'delta',
+        tag: 'delta',
         path: sub.path ? slash2dp(sub.path) : '',
         scope: sub.scope,
         from_seq: sub.commit_cursor,
@@ -3192,6 +3388,100 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && pn === '/api/search') {
       return respondDoc(req, res, url, buildQueryEntitiesDoc(url.origin, url));
+    }
+    if (req.method === 'GET' && pn === '/api/roots') {
+      return Jfast(res, { roots: stRoots.all().map(row => row.name) });
+    }
+
+    if (req.method === 'GET' && pn === '/api/count') {
+      const p = fastReadParams(url);
+      const base = fastBaseWhere({
+        root: p.root,
+        prefix: p.prefix,
+        hasData: p.hasData,
+        exclude: p.exclude,
+        maxDepth: p.maxDepth,
+      });
+      const row = dbRead.prepare(`SELECT COUNT(*) AS c FROM nodes WHERE ${base.sql}`).get(...base.args);
+      return Jfast(res, { count: row.c });
+    }
+
+    if (req.method === 'GET' && pn === '/api/scan') {
+      const p = fastReadParams(url);
+      const keysOnly = url.searchParams.get('keys_only') === '1';
+      const built = fastBuildScan({
+        root: p.root,
+        prefix: p.prefix,
+        order: p.order,
+        limit: fastClampLimit(url.searchParams.get('limit')),
+        offset: Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0),
+        hasData: p.hasData,
+        exclude: p.exclude,
+        maxDepth: p.maxDepth,
+        keysOnly,
+      });
+      const rows = dbRead.prepare(built.sql).all(...built.args);
+      if (keysOnly) return Jfast(res, { keys: rows.map(row => row.path) });
+      return Jfast(res, { rows: fastParseRows(rows) });
+    }
+
+    if (req.method === 'GET' && pn === '/api/text') {
+      const p = fastReadParams(url);
+      const positives = url.searchParams.getAll('pos').filter(Boolean);
+      const negatives = url.searchParams.getAll('neg').filter(Boolean);
+      const mode = url.searchParams.get('mode') || 'scan';
+      const common = {
+        root: p.root,
+        prefix: p.prefix,
+        order: p.order,
+        limit: fastClampLimit(url.searchParams.get('limit')),
+        hasData: p.hasData,
+        exclude: p.exclude,
+        maxDepth: p.maxDepth,
+      };
+
+      let built;
+
+      if (mode === 'index') {
+        if (!positives.length) return Jfast(res, { rows: [], mode });
+        built = fastBuildTextIndex({ ...common, positives });
+      } else {
+        built = fastBuildTextScan({
+          ...common,
+          positives,
+          negatives,
+          strict: url.searchParams.get('strict') === '1',
+        });
+      }
+
+      const rows = dbRead.prepare(built.sql).all(...built.args);
+      return Jfast(res, { rows: fastParseRows(rows), mode });
+    }
+
+    if (req.method === 'POST' && pn === '/api/records') {
+      let body;
+
+      try {
+        body = JSON.parse(await readBody(req, FAST_MAX_BODY_BYTES));
+      } catch (err) {
+        return J(res, { error: err.message || 'bad json' }, err.statusCode || 400);
+      }
+
+      const root = String(body.root || '');
+      const paths = Array.isArray(body.paths) ? body.paths : [];
+      const rows = [];
+
+      for (const rawPath of paths) {
+        const recordPath = String(rawPath || '').replace(/^\/+|\/+$/g, '');
+        const row = stFastRecord.get(root, recordPath);
+
+        rows.push({
+          path: recordPath,
+          data: row && row.data ? fastParseJson(row.data) : null,
+        });
+      }
+
+      return Jfast(res, { rows });
     }
 
     if (req.method === 'GET' && pn === '/query/entities') {
@@ -3302,7 +3592,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         filtered.push({
-          op: row.op_kind,
+          op: row.op_tag,
           path: slash2dp(row.path),
           data: payload ? payload.data : null,
           commit_seq: row.commit_seq,
@@ -3314,7 +3604,7 @@ const server = http.createServer(async (req, res) => {
 
       return respondDoc(req, res, url, {
         _state: {
-          kind: 'change_page',
+          tag: 'change_page',
           path: dp,
           cursor,
           next_cursor: nextCursor,
@@ -3372,7 +3662,7 @@ const server = http.createServer(async (req, res) => {
 
       writeSSE(res, {
         _state: {
-          kind: 'cursor',
+          tag: 'cursor',
           path: dp,
           scope,
           commit_seq: initialCursor,
